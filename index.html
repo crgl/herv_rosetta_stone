@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HERV catalog browser</title>
+<style>
+ :root{--ink:#1b1b1f;--mut:#6b6b76;--line:#dcdce3;--bg:#fbfbfd;--pan:#fff;
+       --ltr:#3b6ea5;--int:#a5553b;--orf:#4a7c59;--dom:#8c6d3f;--gene:#7a5c8f;--acc:#2b5f8a}
+ *{box-sizing:border-box}
+ body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+      color:var(--ink);background:var(--bg)}
+ header{background:var(--pan);border-bottom:1px solid var(--line);padding:14px 20px}
+ h1{margin:0 0 10px;font-size:17px;font-weight:600;letter-spacing:-.01em}
+ h1 span{font-weight:400;color:var(--mut);font-size:13px;margin-left:8px}
+ .searchbar{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+ select,input{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:5px;background:#fff}
+ select{min-width:190px}
+ .sw{position:relative;flex:1;min-width:280px;max-width:520px}
+ input{width:100%}
+ #hint{font-size:12px;color:var(--mut);margin-top:4px;min-height:16px}
+ #results{position:absolute;top:100%;left:0;right:0;z-index:40;background:#fff;
+   border:1px solid var(--line);border-radius:5px;margin-top:3px;max-height:340px;overflow-y:auto;
+   box-shadow:0 6px 20px rgba(0,0,0,.10);display:none}
+ #results.on{display:block}
+ .ri{padding:7px 10px;cursor:pointer;border-bottom:1px solid #f0f0f4;display:flex;
+     justify-content:space-between;gap:10px;align-items:baseline}
+ .ri:last-child{border-bottom:0}
+ .ri:hover,.ri.sel{background:#eef4fa}
+ .ri b{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+ .ri em{font-style:normal;color:var(--mut);font-size:12px}
+ .badge{font-size:10px;padding:1px 5px;border-radius:3px;background:#eee;color:#555;white-space:nowrap}
+ .badge.retired{background:#fbeaea;color:#9a3d3d}
+ .badge.ambig{background:#fdf3e2;color:#8c6d3f}
+ main{padding:18px 20px;max-width:1180px}
+ .empty{color:var(--mut);padding:44px 0;text-align:center}
+ .panel{background:var(--pan);border:1px solid var(--line);border-radius:7px;padding:14px 16px;margin-bottom:14px}
+ .panel h2{margin:0 0 10px;font-size:13px;font-weight:600;text-transform:uppercase;
+   letter-spacing:.05em;color:var(--mut)}
+ .idline{display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;margin-bottom:2px}
+ .idline .cid{font-size:21px;font-weight:600;font-family:ui-monospace,Menlo,monospace}
+ .idline .uid{font-family:ui-monospace,Menlo,monospace;color:var(--mut);font-size:13px}
+ table{border-collapse:collapse;width:100%;font-size:13px}
+ th,td{text-align:left;padding:4px 9px 4px 0;vertical-align:top;border-bottom:1px solid #f2f2f6}
+ th{font-weight:600;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+ tr:last-child td{border-bottom:0}
+ .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;font-size:13px}
+ .kv dt{color:var(--mut)}
+ .kv dd{margin:0;font-variant-numeric:tabular-nums}
+ .mono{font-family:ui-monospace,Menlo,monospace}
+ .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+ @media(max-width:820px){.two{grid-template-columns:1fr}}
+ a{color:var(--acc)}
+ .ucsc{display:inline-block;padding:3px 9px;border:1px solid var(--acc);border-radius:4px;
+   font-size:12px;text-decoration:none;margin-right:7px}
+ .ucsc:hover{background:#eef4fa}
+ .lg{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin-top:6px}
+ .lg i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+ .note{font-size:12px;color:var(--mut);font-style:italic;margin-top:6px}
+ svg{display:block;max-width:100%;height:auto}
+ .tabs{display:flex;gap:2px;margin-bottom:-1px}
+ .tab{padding:5px 12px;border:1px solid var(--line);border-bottom:0;border-radius:5px 5px 0 0;
+   background:#f2f2f6;cursor:pointer;font-size:12px}
+ .tab.on{background:#fff;font-weight:600}
+ .tabbody{border:1px solid var(--line);border-radius:0 6px 6px 6px;padding:12px;background:#fff}
+</style>
+</head>
+<body>
+<header>
+  <h1>HERV catalog browser <span id="sub">loading index…</span></h1>
+  <div class="searchbar">
+    <select id="kspace"></select>
+    <div class="sw">
+      <input id="q" placeholder="type an identifier…" autocomplete="off" spellcheck="false">
+      <div id="results"></div>
+      <div id="hint"></div>
+    </div>
+  </div>
+</header>
+<main><div id="view"><div class="empty">Pick a system and start typing to find a locus.</div></div></main>
+
+<script>
+const MAXSHOW=20, IDENT_LABEL={combined_id:"combined_id (positional)",versioned_id:"versioned_id (with version)",
+  telescope_id:"telescope_id",hervd_id:"HERVd ID",ervmap_id:"ERVmap ID",ervmap_alt_name:"ERVmap alt name"};
+const CLASS_LABEL={dfam_int_model:"Dfam internal model",dfam_accession:"Dfam accession",repbase_name:"RepBase name"};
+let IDX=null, NB=400, shardCache=new Map(), curSel=-1, curList=[];
+
+function djb2(s){let h=5381;for(let i=0;i<s.length;i++)h=((h*33)+s.charCodeAt(i))>>>0;return h;}
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=n=>n==null||n===""?"—":(typeof n==="number"?n.toLocaleString():esc(n));
+const bp=n=>n==null?"—":Number(n).toLocaleString()+" bp";
+
+async function boot(){
+  try{ await boot_(); }catch(e){ showError("Startup",e); }
+}
+async function boot_(){
+  const r=await fetch("data/search_index.json.gz");
+  IDX=JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text());
+  const sm=await (await fetch("data/shard_meta.json")).json(); NB=sm.n_buckets;
+  const ks=$("kspace"); let g1=document.createElement("optgroup"); g1.label="Identifier — resolves to one locus";
+  for(const t of IDX.meta.ident_types){const o=document.createElement("option");o.value="i:"+t;
+    o.textContent=(IDENT_LABEL[t]||t)+"  ("+Object.keys(IDX.ident[t]).length.toLocaleString()+")";g1.appendChild(o);}
+  let g2=document.createElement("optgroup"); g2.label="Classifier — resolves to a locus list";
+  for(const t of IDX.meta.class_types){const o=document.createElement("option");o.value="c:"+t;
+    o.textContent=(CLASS_LABEL[t]||t)+"  ("+Object.keys(IDX.classifier[t]).length.toLocaleString()+")";g2.appendChild(o);}
+  ks.appendChild(g1);ks.appendChild(g2);
+  $("sub").textContent=IDX.meta.n_loci.toLocaleString()+" loci";
+  ks.onchange=()=>{$("q").value="";onType();$("q").focus();};
+  $("q").addEventListener("input",onType);
+  $("q").addEventListener("keydown",onKey);
+  document.addEventListener("click",e=>{if(!e.target.closest(".sw"))hide();});
+  onType();
+}
+function hide(){$("results").classList.remove("on");curSel=-1;}
+
+function onType(){
+  const sel=$("kspace").value,[kind,type]=sel.split(":"),qs=$("q").value.trim().toUpperCase();
+  const pool=kind==="i"?IDX.ident[type]:IDX.classifier[type];
+  const keys=Object.keys(pool);
+  if(kind==="c"&&!qs){ // low-cardinality: browse whole menu
+    show(keys.sort().slice(0,MAXSHOW*3),kind,type,pool);
+    $("hint").textContent=keys.length+" values — scroll or type to filter";return;}
+  if(!qs){hide();$("hint").textContent=keys.length.toLocaleString()+" searchable strings";return;}
+  let hits=keys.filter(k=>k.toUpperCase().startsWith(qs));
+  if(hits.length<MAXSHOW){const sub=keys.filter(k=>!k.toUpperCase().startsWith(qs)&&k.toUpperCase().includes(qs));
+    hits=hits.concat(sub);}
+  if(hits.length>MAXSHOW*8){hide();
+    $("hint").textContent=hits.length.toLocaleString()+" matches — keep typing to narrow to "+MAXSHOW;return;}
+  hits.sort((a,b)=>a.length-b.length||a.localeCompare(b));
+  show(hits.slice(0,MAXSHOW*3),kind,type,pool);
+  $("hint").textContent=hits.length<=MAXSHOW?hits.length+" match"+(hits.length==1?"":"es")
+      :hits.length.toLocaleString()+" matches — showing first "+Math.min(hits.length,MAXSHOW*3);
+}
+function show(hits,kind,type,pool){
+  const R=$("results");
+  if(!hits.length){R.innerHTML='<div class="ri"><em>no match</em></div>';R.classList.add("on");return;}
+  curList=hits.map(k=>{const v=pool[k];
+    return kind==="i"?{k,uids:v[0],cur:v[1],kind,type}:{k,uids:v,cur:1,kind,type};});
+  R.innerHTML=curList.map((h,i)=>{
+    const n=h.uids.length, badges=[];
+    if(h.kind==="i"&&!h.cur)badges.push('<span class="badge retired">retired</span>');
+    if(n>1)badges.push('<span class="badge ambig">'+n+" loci</span>");
+    if(h.kind==="c")badges.push('<span class="badge">'+n+" loci</span>");
+    const sec=h.kind==="i"&&n===1?(IDX.uid2cid[h.uids[0]]||""):"";
+    return '<div class="ri" data-i="'+i+'"><span><b>'+esc(h.k)+"</b>"+
+      (sec&&sec!==h.k?' <em>→ '+esc(sec)+"</em>":"")+"</span><span>"+badges.join(" ")+"</span></div>";
+  }).join("");
+  R.classList.add("on");
+  [...R.querySelectorAll(".ri[data-i]")].forEach(el=>el.onclick=()=>pick(+el.dataset.i));
+}
+function onKey(e){
+  const items=[...$("results").querySelectorAll(".ri[data-i]")];
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();
+    if(!items.length)return; curSel=(curSel+(e.key==="ArrowDown"?1:-1)+items.length)%items.length;
+    items.forEach((el,i)=>el.classList.toggle("sel",i===curSel));
+    items[curSel].scrollIntoView({block:"nearest"});}
+  else if(e.key==="Enter"){if(curSel>=0)pick(+items[curSel].dataset.i);else if(items.length===1)pick(0);}
+  else if(e.key==="Escape")hide();
+}
+// Errors inside an async handler become unhandled rejections and vanish silently —
+// a bad shard then looks like "click does nothing". Always surface to the page.
+function showError(where,e){
+  console.error(where,e);
+  $("view").innerHTML='<div class="panel"><h2 style="color:#a33">'+esc(where)+' failed</h2>'+
+    '<div class="note mono" style="white-space:pre-wrap">'+esc(e&&e.message||String(e))+'</div>'+
+    '<div class="note">Check the browser console for the stack. If this mentions JSON, the data bundle is malformed — rebuild it.</div></div>';
+}
+async function pick(i){
+  try{
+    const h=curList[i]; hide(); $("q").value=h.k;
+    if(h.uids.length===1){
+      const d=await getLocus(h.uids[0]);
+      if(!d) throw new Error("locus "+h.uids[0]+" absent from shard "+(djb2(h.uids[0])%NB));
+      return render(d,h);
+    }
+    const rows=(await Promise.all(h.uids.slice(0,400).map(getLocus))).filter(Boolean);
+    renderList(h,rows);
+  }catch(e){ showError("Loading locus",e); }
+}
+async function getLocus(uid){
+  const b=djb2(uid)%NB;
+  if(!shardCache.has(b)){
+    const r=await fetch("data/loci/"+b+".json.gz");
+    if(!r.ok) throw new Error("shard "+b+" fetch failed: HTTP "+r.status);
+    const txt=await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text();
+    let obj;
+    try{ obj=JSON.parse(txt); }
+    catch(e){ throw new Error("shard "+b+" is not valid JSON ("+e.message+
+      "). Non-finite values such as NaN are not legal JSON — rebuild with allow_nan=False."); }
+    shardCache.set(b,obj);
+  }
+  return shardCache.get(b)[uid];
+}
+if(typeof window!=="undefined"&&window.addEventListener){
+  window.addEventListener("unhandledrejection",e=>showError("Async operation",e.reason||e));
+  window.addEventListener("error",e=>showError("Script error",e.error||e.message));
+}
+function renderList(h,rows){
+  $("view").innerHTML='<div class="panel"><h2>'+esc(h.k)+" — "+rows.length.toLocaleString()+
+    ' loci</h2><table><tr><th>combined_id</th><th>group</th><th>band</th><th>hg38</th><th>origin</th></tr>'+
+    rows.map(d=>{const c=(d.coord||[]).find(x=>x.assembly==="hg38");
+      return '<tr><td><a href="#" class="mono" data-u="'+d.uid+'">'+esc(d.combined_id)+"</a></td><td>"+
+      esc(d.group)+"</td><td>"+fmt(d.band)+"</td><td class=mono>"+
+      (c?esc(c.chrom)+":"+fmt(c.start)+"-"+fmt(c.end):"—")+"</td><td>"+esc(d.origin)+"</td></tr>";}).join("")+
+    "</table></div>";
+  [...$("view").querySelectorAll("a[data-u]")].forEach(a=>a.onclick=async e=>{
+    e.preventDefault();render(await getLocus(a.dataset.u),h);});
+}
+</script>
+<script src="detail.js"></script>
+<script>boot();</script>
+</body></html>
