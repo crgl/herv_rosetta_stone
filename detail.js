@@ -29,15 +29,15 @@ function render(d,h){
      '<div style="margin-top:9px">'+links+'</div></div>'+
    '<div class="two">'+
      '<div class="panel"><h2>Locus</h2><dl class="kv">'+
-       kv("group",d.group)+kv("band",d.band)+kv("origin",d.origin)+
+       kv("clade",d.group)+kv("band",d.band)+kv("origin",d.origin)+
        kv("structure",st.structure)+kv("category",st.category)+
        kv("LTR names",st.ltr_names)+kv("internal names",st.int_names)+
        kv("tandem/nested",st.is_tandem_or_nested?"yes":"no")+
        kv("segments",d.segments.length+(d.segments.length?"":" (none stored)"))+
      '</dl></div>'+
-     '<div class="panel"><h2>Group — '+esc(d.group)+'</h2><dl class="kv">'+
+     '<div class="panel"><h2>Clade — '+esc(d.group)+'</h2><dl class="kv">'+
        kv("superfamily",g.superfamily)+kv("HERV class",g.herv_class)+
-       kv("loci in group",g.n_loci)+kv("int model",g.intModel)+
+       kv("loci in clade",g.n_loci)+kv("int model",g.intModel)+
        kv("RepBase class",g.repbase_class)+kv("HERVd family",g.hervd_family)+
        kv("dominant LTR",g.dominant_ltr)+
        kv("with flanking LTR",g.frac_with_flanking_ltr==null?null:(100*g.frac_with_flanking_ltr).toFixed(1)+"%")+

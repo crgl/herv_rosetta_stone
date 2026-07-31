@@ -19,7 +19,8 @@ dash/
   index.html              search UI + keyspace dropdown + result list
   detail.js               detail panels + SVG locus graphic
   data/
-    search_index.json.gz  1.4 MB  alias -> locus_uid, all 9 keyspaces
+    search_index.json.gz  3.1 MB  fuzzy postings (all schemes) + classifier
+                                  keyspaces + listmeta rows for paged lists
     shard_meta.json       bucket count + hash name
     loci/0..399.json.gz    13 MB  per-locus detail, djb2(uid) % 400
     gene_models.json.gz     ~3 MB  GENCODE V50 transcripts per locus window
@@ -27,7 +28,40 @@ dash/
 
 Total ~17 MB. Only the index (1.4 MB) plus one 32 KB shard load for a given lookup.
 
-## Search — two dropdown sections, because the keyspaces behave differently
+## Search — four dropdown sections, because the keyspaces behave differently
+
+**Fuzzy search (the default)** looks across every identifier keyspace at once, for the
+common case where you have a string but not the scheme it came from. It normalises away
+case and punctuation, and each result row names which scheme matched and lists the other
+aliases that also hit that locus.
+
+Matching runs in tiers, best first, and the tier is shown as a badge:
+
+| tier | meaning |
+|---|---|
+| *(none)* | exact string, or exact after stripping case/punctuation |
+| `prefix` | the normalised query is a prefix of a longer identifier |
+| `prefix-collapsed` | matched only after also dropping a leading `HERV`/`ERV` |
+
+The last tier is separated deliberately rather than merged in. It is the only way
+`HERVK-108`, `HERV-K108` and `HERVK108` reach the catalog's actual string for that locus,
+`K108R` (an `ervmap_alt_name`, stored packed as `K108R, ERVK-6` — the index splits on
+commas, or exact search would miss it). But collapsing that prefix is **not** a safe
+identity: `K-10` is `HML2_1q22` while `ERVK-10` is `HML2_5q33.3`, and `ERVK-10` happens to
+be the same locus as `K-11`. The two K-series are independent numbering systems, not
+offset by a constant — 991 collapsed keys merge loci that plain normalisation keeps apart.
+So a collapsed hit is shown, ranked last, and badged; it is never presented as equivalent
+to an exact match.
+
+Bare numbers are inherently cross-resource: 3,021 `ervmap_id` and 20,228 `hervd_id` strings
+are plain integers and 7 values collide outright. Fuzzy search returns both and labels the
+scheme, which is the honest answer.
+
+**`locus_uid` — internal joining key** is last in the dropdown and available only when
+explicitly selected. It is excluded from fuzzy search on purpose: 96.6% of UIDs carry a
+`HERVL` prefix while belonging to some *other* group (`HERVL000001` is `ERV316A3`), so
+surfacing them in a general search would imply a family membership that does not exist. It
+collides with no real identifier string, so exposing it under an explicit selection is safe.
 
 **Identifier types** resolve to a single locus and autocomplete:
 
@@ -58,6 +92,19 @@ place without erroring.
 
 The detail header states which ID to cite (`versioned_id`) and which is the immutable
 key (`locus_uid`).
+
+### Locus lists page, and filter on `combined_id`
+
+A classifier hit can name thousands of loci — `ERVL-E-int` alone is 4,757. Lists render
+100 rows per page with prev/next, plus a filter box that substring-matches `combined_id`
+across the *whole* set and re-pages the matches, not just the visible page.
+
+Rows come from `listmeta` in the search index, not from the locus shards. Loci are
+hash-spread across 400 shards, so drawing a 4,757-row family by shard fetch would touch
+essentially every shard (~22 MB); `listmeta` is 0.64 MB for the entire catalog and is
+dictionary-encoded (group/origin/chrom as ints) and uid-index aligned with
+`fuzzy["uids"]`, so a posting addresses its row directly. Paging and filtering are pure
+array operations with no fetches.
 
 ## The locus graphic
 

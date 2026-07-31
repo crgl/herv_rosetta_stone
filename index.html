@@ -57,6 +57,16 @@
  .lg i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:4px;vertical-align:-1px}
  .note{font-size:12px;color:var(--mut);font-style:italic;margin-top:6px}
  svg{display:block;max-width:100%;height:auto}
+ .badge.collapse{background:#fdf0e2;border-color:#e0b787;color:#8a5417}
+ .tsrc{font-size:10px;color:#777;background:#f2f2f6;border-radius:3px;padding:1px 5px}
+ .alts{font-size:10.5px;color:#666;margin-top:2px}
+ .alts b{font-weight:600;color:#333}
+ .lbar{display:flex;gap:10px;align-items:center;margin:6px 0 10px}
+ .lbar input{min-width:260px}
+ .pager{display:flex;gap:10px;align-items:center;margin-top:10px}
+ .pager button{font:inherit;padding:4px 11px;border:1px solid var(--line);border-radius:5px;
+   background:#fff;cursor:pointer}
+ .pager button:disabled{color:#bbb;cursor:default;background:#fafafa}
  .tabs{display:flex;gap:2px;margin-bottom:-1px}
  .tab{padding:5px 12px;border:1px solid var(--line);border-bottom:0;border-radius:5px 5px 0 0;
    background:#f2f2f6;cursor:pointer;font-size:12px}
@@ -83,6 +93,17 @@ const MAXSHOW=20, IDENT_LABEL={combined_id:"combined_id (positional)",versioned_
   telescope_id:"telescope_id",hervd_id:"HERVd ID",ervmap_id:"ERVmap ID",ervmap_alt_name:"ERVmap alt name"};
 const CLASS_LABEL={dfam_int_model:"Dfam internal model",dfam_accession:"Dfam accession",repbase_name:"RepBase name"};
 let IDX=null, NB=400, shardCache=new Map(), curSel=-1, curList=[];
+let FZ=null, LM=null, KPOS=null, CPOS=null, listState=null;
+const PAGE=100;
+// Match tiers, best first. Kept explicit rather than a score so the badge in the
+// results list says exactly which kind of match produced the hit.
+const TIER={EXACT:0,NORM:1,PREFIX:2,COLLAPSE:3,CPREFIX:4};
+const TIER_BADGE=["","normalised","prefix","prefix-collapsed","prefix-collapsed"];
+const nrm=s=>String(s).toUpperCase().replace(/[^A-Z0-9]/g,"");
+const nrmc=s=>nrm(s).replace(/^(HERV|ERV)/,"");
+// binary search for the first key >= q
+function lb(arr,q){let lo=0,hi=arr.length;while(lo<hi){const m=(lo+hi)>>1;
+  if(arr[m]<q)lo=m+1;else hi=m;}return lo;}
 
 function djb2(s){let h=5381;for(let i=0;i<s.length;i++)h=((h*33)+s.charCodeAt(i))>>>0;return h;}
 const $=id=>document.getElementById(id);
@@ -97,13 +118,38 @@ async function boot_(){
   const r=await fetch("data/search_index.json.gz");
   IDX=JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text());
   const sm=await (await fetch("data/shard_meta.json")).json(); NB=sm.n_buckets;
-  const ks=$("kspace"); let g1=document.createElement("optgroup"); g1.label="Identifier — resolves to one locus";
+  FZ=IDX.fuzzy; LM=IDX.listmeta;
+  // key -> posting index, built once. 150k entries; a Map lookup beats
+  // Object.keys() scans on every keystroke.
+  KPOS=new Map(); FZ.keys.forEach((k,i)=>KPOS.set(k,i));
+  CPOS=new Map(); FZ.ckeys.forEach((k,i)=>CPOS.set(k,i));
+  // per-type string counts for the dropdown labels, from the fuzzy postings
+  const tcount=FZ.types.map(()=>new Set());
+  FZ.post.forEach(pl=>pl.forEach(p=>tcount[p[1]].add(p[2])));
+
+  const ks=$("kspace");
+  const gAll=document.createElement("optgroup"); gAll.label="All identifiers";
+  const oAll=document.createElement("option"); oAll.value="f:*"; oAll.selected=true;
+  oAll.textContent="Fuzzy search — any naming scheme  ("+
+    FZ.keys.length.toLocaleString()+")";
+  gAll.appendChild(oAll); ks.appendChild(gAll);
+
+  let g1=document.createElement("optgroup"); g1.label="Identifier — resolves to one locus";
   for(const t of IDX.meta.ident_types){const o=document.createElement("option");o.value="i:"+t;
-    o.textContent=(IDENT_LABEL[t]||t)+"  ("+Object.keys(IDX.ident[t]).length.toLocaleString()+")";g1.appendChild(o);}
+    o.textContent=(IDENT_LABEL[t]||t)+"  ("+tcount[FZ.types.indexOf(t)].size.toLocaleString()+")";g1.appendChild(o);}
   let g2=document.createElement("optgroup"); g2.label="Classifier — resolves to a locus list";
   for(const t of IDX.meta.class_types){const o=document.createElement("option");o.value="c:"+t;
     o.textContent=(CLASS_LABEL[t]||t)+"  ("+Object.keys(IDX.classifier[t]).length.toLocaleString()+")";g2.appendChild(o);}
   ks.appendChild(g1);ks.appendChild(g2);
+
+  // Internal joining key, last and opt-in. Deliberately excluded from fuzzy
+  // search: 96.6% of locus_uids carry a HERVL prefix while belonging to some
+  // other clade (HERVL000001 is ERV316A3), so surfacing them in a general
+  // search would suggest a family membership that does not exist.
+  const g3=document.createElement("optgroup"); g3.label="Internal";
+  const o3=document.createElement("option"); o3.value="u:uid";
+  o3.textContent="locus_uid — internal joining key  ("+FZ.uids.length.toLocaleString()+")";
+  g3.appendChild(o3); ks.appendChild(g3);
   $("sub").textContent=IDX.meta.n_loci.toLocaleString()+" loci";
   ks.onchange=()=>{$("q").value="";onType();$("q").focus();};
   $("q").addEventListener("input",onType);
@@ -113,37 +159,140 @@ async function boot_(){
 }
 function hide(){$("results").classList.remove("on");curSel=-1;}
 
-function onType(){
-  const sel=$("kspace").value,[kind,type]=sel.split(":"),qs=$("q").value.trim().toUpperCase();
-  const pool=kind==="i"?IDX.ident[type]:IDX.classifier[type];
-  const keys=Object.keys(pool);
-  if(kind==="c"&&!qs){ // low-cardinality: browse whole menu
-    show(keys.sort().slice(0,MAXSHOW*3),kind,type,pool);
-    $("hint").textContent=keys.length+" values — scroll or type to filter";return;}
-  if(!qs){hide();$("hint").textContent=keys.length.toLocaleString()+" searchable strings";return;}
-  let hits=keys.filter(k=>k.toUpperCase().startsWith(qs));
-  if(hits.length<MAXSHOW){const sub=keys.filter(k=>!k.toUpperCase().startsWith(qs)&&k.toUpperCase().includes(qs));
-    hits=hits.concat(sub);}
-  if(hits.length>MAXSHOW*8){hide();
-    $("hint").textContent=hits.length.toLocaleString()+" matches — keep typing to narrow to "+MAXSHOW;return;}
-  hits.sort((a,b)=>a.length-b.length||a.localeCompare(b));
-  show(hits.slice(0,MAXSHOW*3),kind,type,pool);
-  $("hint").textContent=hits.length<=MAXSHOW?hits.length+" match"+(hits.length==1?"":"es")
-      :hits.length.toLocaleString()+" matches — showing first "+Math.min(hits.length,MAXSHOW*3);
+/* Cross-keyspace search over the fuzzy postings.
+   `only` restricts to one alias type (single-keyspace mode); null searches all.
+
+   Tiers are evaluated best-first and a (uid, matched string) pair is emitted
+   once, at its best tier. The collapsed tiers exist because the catalog spells
+   HERV-K108 as "K108R" -- but they are NOT merged into the exact tiers: K-10 and
+   ERVK-10 are genuinely different loci, so a collapsed hit is badged as such
+   rather than presented as an equal match. */
+function fuzzySearch(q,only,cap){
+  const n=nrm(q); if(!n)return [];
+  const c=nrmc(q), out=[], seen=new Set();
+  const tix=only==null?-1:FZ.types.indexOf(only);
+  const take=(tier,ki)=>{
+    for(const p of FZ.post[ki]){
+      if(tix>=0&&p[1]!==tix)continue;
+      const sig=p[0]+"|"+p[2];
+      if(seen.has(sig))continue;
+      seen.add(sig);
+      out.push({tier,uid:FZ.uids[p[0]],type:FZ.types[p[1]],str:p[2],cur:p[3],key:FZ.keys[ki]});
+    }};
+  const ex=KPOS.get(n); if(ex!==undefined)take(nrm(q)===String(q).toUpperCase()?TIER.EXACT:TIER.NORM,ex);
+  for(let i=lb(FZ.keys,n);i<FZ.keys.length&&out.length<cap;i++){
+    if(!FZ.keys[i].startsWith(n))break;
+    if(i!==ex)take(TIER.PREFIX,i);
+  }
+  if(out.length<cap){
+    const ce=CPOS.get(c);
+    if(ce!==undefined)for(const ki of FZ.cmap[ce])take(TIER.COLLAPSE,ki);
+    for(let i=lb(FZ.ckeys,c);i<FZ.ckeys.length&&out.length<cap;i++){
+      if(!FZ.ckeys[i].startsWith(c))break;
+      if(i!==ce)for(const ki of FZ.cmap[i])take(TIER.CPREFIX,ki);
+    }
+  }
+  out.sort((a,b)=>a.tier-b.tier||a.str.length-b.str.length||a.str.localeCompare(b.str));
+  return out;
 }
-function show(hits,kind,type,pool){
+
+function onType(){
+  const sel=$("kspace").value,[kind,type]=sel.split(":"),raw=$("q").value.trim(),qs=raw.toUpperCase();
+
+  if(kind==="c"){ // classifier: low cardinality, browse or filter the menu
+    const pool=IDX.classifier[type], keys=Object.keys(pool);
+    let hits=qs?keys.filter(k=>k.toUpperCase().includes(qs)):keys.slice().sort();
+    hits.sort((a,b)=>a.length-b.length||a.localeCompare(b));
+    show(hits.slice(0,MAXSHOW*3).map(k=>({k,uids:pool[k],cur:1,kind,type})));
+    $("hint").textContent=qs?hits.length+" of "+keys.length+" values"
+      :keys.length+" values — scroll or type to filter";
+    return;}
+
+  if(kind==="u"){ // internal joining key, explicitly selected
+    if(!raw){hide();$("hint").textContent=FZ.uids.length.toLocaleString()+
+      " internal keys — HERVL###### (prefix is NOT the family)";return;}
+    const hits=[]; const nq=qs;
+    for(let i=lb(FZ.uids,nq);i<FZ.uids.length&&hits.length<MAXSHOW*3;i++){
+      if(!FZ.uids[i].startsWith(nq))break;
+      hits.push({k:FZ.uids[i],uids:[FZ.uids[i]],cur:1,kind,type});}
+    show(hits);
+    // The caveat stays visible while results are on screen, not only on an empty
+    // box: the HERVL prefix is at its most misleading precisely when the user is
+    // reading a list of HERVL###### keys whose clades are mostly not HERVL.
+    $("hint").textContent=(hits.length?hits.length+" internal key"+(hits.length==1?"":"s")
+      :"no internal key starts with that")+" — HERVL prefix is NOT the family";
+    return;}
+
+  if(!raw){hide();
+    $("hint").textContent=kind==="f"
+      ? FZ.keys.length.toLocaleString()+" strings across all naming schemes"
+      : "type an identifier";
+    return;}
+
+  const only=kind==="i"?type:null;
+  const hits=fuzzySearch(raw,only,MAXSHOW*10);
+
+  /* Two-stage grouping.
+
+     First by matched string+scheme, because one string may name several loci —
+     11,475 combined_id strings do. Collapsing straight to loci would render such
+     a string as N identical-looking rows and lose the "N loci" badge that sends
+     the click to a disambiguation list instead of a guessed locus.
+
+     Then by locus set, so the several spellings that name the same locus (K108R
+     and the packed "K108R, ERVK-6") arrive as one row that discloses both. */
+  const byS=new Map();
+  for(const h of hits){
+    const sig=h.str+"\u0000"+h.type;
+    if(!byS.has(sig))byS.set(sig,{k:h.str,type:h.type,tier:h.tier,cur:h.cur,uids:[]});
+    const g=byS.get(sig);
+    g.uids.push(h.uid);
+    if(h.tier<g.tier)g.tier=h.tier;
+    if(!h.cur)g.cur=0;
+  }
+  const byU=new Map();
+  for(const g of byS.values()){
+    const sig=g.uids.slice().sort().join("|");
+    if(!byU.has(sig)){byU.set(sig,{k:g.k,uids:g.uids,cur:g.cur,kind:"i",
+      type:g.type,tier:g.tier,alts:[]});continue;}
+    const m=byU.get(sig);
+    if(g.tier<m.tier){ // a better-tier spelling becomes the headline
+      m.alts.unshift({s:m.k,t:m.type}); m.k=g.k; m.type=g.type; m.tier=g.tier;
+    } else if(m.alts.length<4&&!m.alts.some(a=>a.s===g.k)) m.alts.push({s:g.k,t:g.type});
+    if(!g.cur)m.cur=0;
+  }
+  const rows=[...byU.values()].sort((a,b)=>a.tier-b.tier||a.k.length-b.k.length)
+                              .slice(0,MAXSHOW*3);
+  show(rows);
+  const nLoci=new Set(hits.map(h=>h.uid)).size;
+  const nT=rows.filter(h=>h.tier>=TIER.COLLAPSE).length;
+  $("hint").textContent=nLoci?rows.length.toLocaleString()+" result"+(rows.length==1?"":"s")+
+      " · "+nLoci.toLocaleString()+(nLoci==1?" locus":" loci")+
+      (nT?" — "+nT+" via prefix-collapse (see badge)":"")
+    :"no match in any naming scheme";
+}
+function show(hits){
   const R=$("results");
   if(!hits.length){R.innerHTML='<div class="ri"><em>no match</em></div>';R.classList.add("on");return;}
-  curList=hits.map(k=>{const v=pool[k];
-    return kind==="i"?{k,uids:v[0],cur:v[1],kind,type}:{k,uids:v,cur:1,kind,type};});
+  curList=hits;
   R.innerHTML=curList.map((h,i)=>{
     const n=h.uids.length, badges=[];
     if(h.kind==="i"&&!h.cur)badges.push('<span class="badge retired">retired</span>');
+    if(h.tier>=TIER.COLLAPSE)badges.push('<span class="badge collapse" title="matched only after '+
+      'dropping a leading HERV/ERV — these are separate numbering systems, verify before use">'+
+      TIER_BADGE[h.tier]+"</span>");
+    else if(h.tier===TIER.PREFIX)badges.push('<span class="badge">prefix</span>');
     if(n>1)badges.push('<span class="badge ambig">'+n+" loci</span>");
-    if(h.kind==="c")badges.push('<span class="badge">'+n+" loci</span>");
-    const sec=h.kind==="i"&&n===1?(IDX.uid2cid[h.uids[0]]||""):"";
-    return '<div class="ri" data-i="'+i+'"><span><b>'+esc(h.k)+"</b>"+
-      (sec&&sec!==h.k?' <em>→ '+esc(sec)+"</em>":"")+"</span><span>"+badges.join(" ")+"</span></div>";
+    if(h.kind==="c")badges.push('<span class="badge">'+n.toLocaleString()+" loci</span>");
+    if(h.kind==="u")badges.push('<span class="badge">internal key</span>');
+    // what the matched string resolves to, plus which scheme it came from
+    const sec=(h.kind==="i"||h.kind==="u")&&n===1?(IDX.uid2cid[h.uids[0]]||""):"";
+    const ty=h.kind==="i"&&h.type?'<span class="tsrc">'+esc(IDENT_LABEL[h.type]||h.type)+"</span>":"";
+    const alts=(h.alts&&h.alts.length)
+      ? '<div class="alts">also '+h.alts.map(a=>"<b>"+esc(a.s)+"</b> <em>"+
+          esc(IDENT_LABEL[a.t]||a.t)+"</em>").join(", ")+"</div>" : "";
+    return '<div class="ri" data-i="'+i+'"><span><b>'+esc(h.k)+"</b> "+ty+
+      (sec&&sec!==h.k?' <em>→ '+esc(sec)+"</em>":"")+alts+"</span><span>"+badges.join(" ")+"</span></div>";
   }).join("");
   R.classList.add("on");
   [...R.querySelectorAll(".ri[data-i]")].forEach(el=>el.onclick=()=>pick(+el.dataset.i));
@@ -173,8 +322,9 @@ async function pick(i){
       if(!d) throw new Error("locus "+h.uids[0]+" absent from shard "+(djb2(h.uids[0])%NB));
       return render(d,h);
     }
-    const rows=(await Promise.all(h.uids.slice(0,400).map(getLocus))).filter(Boolean);
-    renderList(h,rows);
+    // No shard fetches: listmeta holds every locus, so a 6,815-row family
+    // renders and pages instantly instead of pulling ~22 MB of shards.
+    renderList(h);
   }catch(e){ showError("Loading locus",e); }
 }
 async function getLocus(uid){
@@ -195,16 +345,64 @@ if(typeof window!=="undefined"&&window.addEventListener){
   window.addEventListener("unhandledrejection",e=>showError("Async operation",e.reason||e));
   window.addEventListener("error",e=>showError("Script error",e.error||e.message));
 }
-function renderList(h,rows){
-  $("view").innerHTML='<div class="panel"><h2>'+esc(h.k)+" — "+rows.length.toLocaleString()+
-    ' loci</h2><table><tr><th>combined_id</th><th>group</th><th>band</th><th>hg38</th><th>origin</th></tr>'+
-    rows.map(d=>{const c=(d.coord||[]).find(x=>x.assembly==="hg38");
-      return '<tr><td><a href="#" class="mono" data-u="'+d.uid+'">'+esc(d.combined_id)+"</a></td><td>"+
-      esc(d.group)+"</td><td>"+fmt(d.band)+"</td><td class=mono>"+
-      (c?esc(c.chrom)+":"+fmt(c.start)+"-"+fmt(c.end):"—")+"</td><td>"+esc(d.origin)+"</td></tr>";}).join("")+
-    "</table></div>";
-  [...$("view").querySelectorAll("a[data-u]")].forEach(a=>a.onclick=async e=>{
-    e.preventDefault();render(await getLocus(a.dataset.u),h);});
+/* Paged, filterable locus list.
+
+   Rows come from listmeta (uid-index aligned with FZ.uids), not from shards, so
+   filtering and paging are pure array work. The filter is a substring match on
+   combined_id -- the column the user actually scans -- and re-pages the matching
+   subset rather than filtering only the visible page. */
+const uidIx=new Map();
+function uidIndex(u){
+  if(!uidIx.size)FZ.uids.forEach((x,i)=>uidIx.set(x,i));
+  return uidIx.get(u);
+}
+function renderList(h){
+  const idxs=h.uids.map(uidIndex).filter(i=>i!==undefined);
+  listState={h,idxs,filt:"",page:0};
+  $("view").innerHTML='<div class="panel"><h2 id="lh"></h2>'+
+    '<div class="lbar"><input id="lf" placeholder="filter combined_id…" autocomplete="off" '+
+    'spellcheck="false"><span id="lc" class="note"></span></div>'+
+    '<div id="ltab"></div><div id="lpg" class="pager"></div></div>';
+  $("lf").addEventListener("input",()=>{listState.filt=$("lf").value.trim().toUpperCase();
+    listState.page=0;drawList();});
+  drawList();
+}
+function listRows(){
+  const {idxs,filt}=listState, R=LM.rows;
+  return filt?idxs.filter(i=>R[i][0].toUpperCase().includes(filt)):idxs;
+}
+function drawList(){
+  const {h}=listState, rows=listRows(), R=LM.rows;
+  const nPage=Math.max(1,Math.ceil(rows.length/PAGE));
+  if(listState.page>=nPage)listState.page=nPage-1;
+  const p=listState.page, slice=rows.slice(p*PAGE,(p+1)*PAGE);
+  $("lh").textContent=h.k+" — "+h.uids.length.toLocaleString()+" loci";
+  $("lc").textContent=listState.filt
+    ? rows.length.toLocaleString()+" of "+h.uids.length.toLocaleString()+" match “"+listState.filt+"”"
+    : h.uids.length.toLocaleString()+" loci";
+  $("ltab").innerHTML=slice.length
+    ? '<table><tr><th>combined_id</th><th>clade</th><th>band</th><th>hg38</th><th>origin</th></tr>'+
+      slice.map(i=>{const r=R[i], ch=r[3]>=0?LM.chroms[r[3]]:"";
+        return '<tr><td><a href="#" class="mono" data-u="'+esc(FZ.uids[i])+'">'+esc(r[0])+"</a></td><td>"+
+          esc(r[1]>=0?LM.groups[r[1]]:"—")+"</td><td>"+fmt(r[2])+"</td><td class=mono>"+
+          (ch&&r[4]>=0?esc(ch)+":"+fmt(r[4])+"-"+fmt(r[5]):"—")+"</td><td>"+
+          esc(r[6]>=0?LM.origins[r[6]]:"—")+"</td></tr>";}).join("")+"</table>"
+    : '<div class="note">no combined_id matches that filter</div>';
+  const lo=rows.length?p*PAGE+1:0, hi=Math.min((p+1)*PAGE,rows.length);
+  $("lpg").innerHTML=rows.length>PAGE
+    ? '<button id="pp"'+(p===0?" disabled":"")+">‹ prev</button>"+
+      '<span class="note">'+lo.toLocaleString()+"–"+hi.toLocaleString()+" of "+
+      rows.length.toLocaleString()+"  (page "+(p+1)+" of "+nPage+")</span>"+
+      '<button id="pn"'+(p>=nPage-1?" disabled":"")+">next ›</button>"
+    : (rows.length?'<span class="note">showing all '+rows.length.toLocaleString()+"</span>":"");
+  if($("pp"))$("pp").onclick=()=>{listState.page--;drawList();};
+  if($("pn"))$("pn").onclick=()=>{listState.page++;drawList();};
+  [...$("ltab").querySelectorAll("a[data-u]")].forEach(a=>a.onclick=async e=>{
+    e.preventDefault();
+    try{ const d=await getLocus(a.dataset.u);
+      if(!d)throw new Error("locus "+a.dataset.u+" absent from shard "+(djb2(a.dataset.u)%NB));
+      render(d,h);
+    }catch(err){ showError("Loading locus",err); }});
 }
 </script>
 <script src="detail.js"></script>

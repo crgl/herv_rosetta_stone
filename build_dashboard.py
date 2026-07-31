@@ -39,7 +39,7 @@ is not.  V44 agreement 78.8% / coverage 63%; V50 agreement 98.3% / coverage 92.8
 Change --gencode only if you also intend the graphic to disagree with hit_gene.
 """
 from __future__ import annotations
-import argparse, gzip, json, math, os, sqlite3, sys, time
+import argparse, gzip, json, math, os, re, sqlite3, sys, time
 from collections import defaultdict
 
 import numpy as np
@@ -126,12 +126,143 @@ def build_search_index(con, out: str) -> pd.DataFrame:
         med = int(np.median([len(v) for v in clsidx[at].values()])) if clsidx[at] else 0
         log(f"  {at:16s} {len(clsidx[at]):>7,} values  | median loci/value {med}")
 
-    n = dump_gz({"ident": ident, "classifier": clsidx,
+    fuzzy = build_fuzzy_index(al, loc)
+
+    # `ident` is NOT shipped: every string in it is present in `fuzzy` tagged
+    # with its type, so the UI serves single-keyspace search by filtering fuzzy
+    # postings on type. Shipping both would duplicate ~0.9 MB. It is still built
+    # above because validate() checks resolution against it.
+    #
+    # locus_uid likewise needs no keyspace of its own -- fuzzy["uids"] is the
+    # sorted uid list, and the UI matches against it directly when the user
+    # explicitly selects the internal-key option (last in the dropdown).
+    listmeta = build_list_meta(con, loc, fuzzy["uids"])
+
+    n = dump_gz({"classifier": clsidx, "fuzzy": fuzzy, "listmeta": listmeta,
                  "uid2cid": dict(zip(loc.locus_uid, loc.combined_id)),
+                 "uid2group": dict(zip(loc.locus_uid, loc["group"])),
                  "meta": {"n_loci": len(loc), "ident_types": IDENT, "class_types": CLASS}},
                 f"{out}/data/search_index.json.gz")
     log(f"  search_index.json.gz  {n/1e6:.2f} MB")
     return loc, al
+
+
+# Normalisation for the cross-keyspace fuzzy search. Two levels, deliberately:
+#
+#   nrm()  strips every non-alphanumeric and uppercases.  HERV-K108 -> HERVK108
+#   nrmc() additionally drops a leading HERV/ERV.          HERV-K108 -> K108
+#
+# nrmc is the ONLY way a user typing "HERVK108" reaches the catalog string
+# "K108R", but it is NOT a safe silent merge: K-10 and ERVK-10 are different
+# loci (HML2_1q22 vs HML2_5q33.3) and ERVK-10 is the same locus as K-11 -- the
+# two K-series are independent numbering systems, not offset by a constant.
+# 991 nrmc keys merge loci that nrm keeps apart. So nrmc hits are emitted as a
+# separate, lower-ranked tier that the UI badges "prefix-collapsed"; they are
+# never folded into the nrm keyspace.
+_NON_ALNUM = re.compile(r"[^A-Z0-9]")
+_ERV_PREFIX = re.compile(r"^(HERV|ERV)")
+
+
+def nrm(s: str) -> str:
+    return _NON_ALNUM.sub("", str(s).upper())
+
+
+def nrmc(s: str) -> str:
+    return _ERV_PREFIX.sub("", nrm(s))
+
+
+def build_list_meta(con, loc: pd.DataFrame, uids: list) -> dict:
+    """Row data for the paged family lists, one entry per locus, uid-index aligned.
+
+    A classifier hit can name 6,815 loci (ERVLE). Rendering that by fetching each
+    locus from its shard touches essentially all 400 shards (~22 MB) because uids
+    are hash-spread; this table is 0.64 MB for the whole catalog and lets the list
+    page, filter and sort entirely client-side with no fetches at all.
+
+    Columns are dictionary-encoded ints where the domain is small. Order matches
+    fuzzy["uids"] exactly, so a posting's uid index addresses this table directly.
+    """
+    lm = loc.set_index("locus_uid").reindex(uids)
+    co = (pd.read_sql("SELECT locus_uid,chrom,start,end FROM locus_coord "
+                      "WHERE assembly='hg38'", con)
+            .drop_duplicates("locus_uid").set_index("locus_uid").reindex(uids))
+
+    groups = sorted(lm["group"].dropna().unique())
+    origins = sorted(lm["origin"].fillna("").unique())
+    chroms = sorted(co["chrom"].fillna("").unique())
+    gi = {v: i for i, v in enumerate(groups)}
+    oi = {v: i for i, v in enumerate(origins)}
+    ci = {v: i for i, v in enumerate(chroms)}
+
+    rows = []
+    for cid, grp, band, org, ch, st, en in zip(
+            lm.combined_id, lm["group"], lm.band, lm["origin"].fillna(""),
+            co.chrom.fillna(""), co.start, co.end):
+        rows.append([cid or "", gi.get(grp, -1), band if pd.notna(band) else "",
+                     ci.get(ch, -1),
+                     int(st) if pd.notna(st) else -1,
+                     int(en) if pd.notna(en) else -1,
+                     oi.get(org, -1)])
+    log(f"  listmeta         {len(rows):>7,} rows    | client-side paging, no shard fetch")
+    return {"groups": groups, "origins": origins, "chroms": chroms, "rows": rows}
+
+
+def build_fuzzy_index(al: pd.DataFrame, loc: pd.DataFrame) -> dict:
+    """Cross-keyspace postings: normalised key -> [[uid_idx, type_idx, original, is_current]].
+
+    Covers every IDENT keyspace EXCEPT locus_uid, which is not an alias type and
+    is exposed only via its own explicitly-selected dropdown option.
+
+    ervmap_alt_name packs several names into one string ('K108R, ERVK-6'), so it
+    is split on commas before indexing -- without the split, searching K108R
+    misses it entirely.
+    """
+    uids = sorted(loc.locus_uid)
+    uid_ix = {u: i for i, u in enumerate(uids)}
+    type_ix = {t: i for i, t in enumerate(IDENT)}
+
+    post = defaultdict(list)
+    seen = set()
+    sub = al[al.alias_type.isin(IDENT)]
+    for r in sub.itertuples():
+        # index the packed string AND its parts, so this index is a strict
+        # superset of the per-keyspace `ident` index (which stores only the
+        # packed form) and can replace it outright.
+        toks = [str(r.alias)]
+        if r.alias_type == "ervmap_alt_name":
+            toks += [t.strip() for t in str(r.alias).split(",")]
+        for tok in toks:
+            if not tok:
+                continue
+            sig = (tok, r.alias_type, r.locus_uid)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            post[nrm(tok)].append([uid_ix[r.locus_uid], type_ix[r.alias_type],
+                                   tok, int(r.is_current)])
+
+    keys = sorted(post)
+    key_ix = {k: i for i, k in enumerate(keys)}
+    # Collapsed keyspace -> the nrm keys it covers, so the collapsed tier reuses
+    # the tier-1/2 postings instead of duplicating them.
+    #
+    # EVERY key is entered under its collapsed form, not just the ones that
+    # actually carry a HERV/ERV prefix. The user's case is exactly the reverse of
+    # the obvious one: they type "HERVK108" (prefixed) and the catalog string is
+    # "K108R" (unprefixed). If only prefixed keys were collapsed, "K108R" would
+    # never appear under collapsed key "K108" and the query would miss.
+    coll = defaultdict(list)
+    for k in keys:
+        coll[_ERV_PREFIX.sub("", k)].append(key_ix[k])
+    ckeys = sorted(coll)
+
+    n_amb = sum(len({p[0] for p in v}) > 1 for v in post.values())
+    log(f"  fuzzy            {len(keys):>7,} keys    | postings {sum(len(v) for v in post.values()):,}"
+        f" | multi-locus keys {n_amb:,}")
+    log(f"  fuzzy-collapsed  {len(ckeys):>7,} keys    | (lower-ranked tier, badged in UI)")
+    return {"uids": uids, "types": IDENT, "keys": keys,
+            "post": [post[k] for k in keys],
+            "ckeys": ckeys, "cmap": [coll[c] for c in ckeys]}
 
 
 # ---------------------------------------------------------------- stage 2
@@ -438,17 +569,36 @@ def validate(out: str) -> bool:
                 present[u] = b
     tested = miss = 0
     examples = []
-    for kind, types in (("ident", idx["meta"]["ident_types"]),
-                        ("classifier", idx["meta"]["class_types"])):
-        for t in types:
-            for k, v in idx[kind][t].items():
-                for u in (v[0] if kind == "ident" else v):
-                    tested += 1
-                    b = djb2(u) % nb
-                    if present.get(u) != b:
-                        miss += 1
-                        if len(examples) < 3:
-                            examples.append((t, k, u, f"in shard {present.get(u)}, want {b}"))
+    fz = idx["fuzzy"]
+    uids = fz["uids"]
+    for t in idx["meta"]["class_types"]:
+        for k, v in idx["classifier"][t].items():
+            for u in v:
+                tested += 1
+                b = djb2(u) % nb
+                if present.get(u) != b:
+                    miss += 1
+                    if len(examples) < 3:
+                        examples.append((t, k, u, f"in shard {present.get(u)}, want {b}"))
+    # fuzzy postings carry uid INDICES into fz["uids"] -- an off-by-one here would
+    # silently point every hit at the wrong locus, so resolve through the index
+    # exactly as the page does rather than trusting the uid list.
+    for key, plist in zip(fz["keys"], fz["post"]):
+        for ui, ti, orig, cur in plist:
+            tested += 1
+            u = uids[ui]
+            b = djb2(u) % nb
+            if present.get(u) != b:
+                miss += 1
+                if len(examples) < 3:
+                    examples.append(("fuzzy", key, u, f"in shard {present.get(u)}, want {b}"))
+    # the collapsed tier must reference real key indices
+    nk = len(fz["keys"])
+    badc = [c for c, ids in zip(fz["ckeys"], fz["cmap"])
+            if any(i < 0 or i >= nk for i in ids)]
+    if badc:
+        ok = False
+        log(f"  FAIL {len(badc)} collapsed keys reference out-of-range postings: {badc[:3]}")
     log(f"  resolutions tested {tested:,} (exhaustive) | misses {miss}"
         + (f" {examples}" if miss else ""))
     if miss:
