@@ -13,6 +13,47 @@ async function geneModels(){
 }
 function coordOf(d,asm){return (d.coord||[]).find(c=>c.assembly===asm);}
 
+// ---- v0.1 transcriptional units -------------------------------------------
+// The TU layer is a SEPARATE assignment from the locus layer: units are built
+// from element walks, not from loci, so one locus can span several units and a
+// unit can carry several loci. Absent for loci excluded from v0.1.
+function tuPanel(d){
+  const t=d.tu||{};
+  if(!t.units||!t.units.length){
+    const why = t.in_v01===false ? "this locus is not represented in the v0.1 unit set"
+                                 : "no v0.1 unit assignment in this bundle";
+    return '<div class="panel"><h2>Transcriptional unit (v0.1)</h2>'+
+           '<div class="note">'+esc(why)+'</div></div>';
+  }
+  const frag=[];
+  if(t.n_tu_overlap_hg38>1) frag.push("hg38: spans "+t.n_tu_overlap_hg38+" units"+
+    (t.dom_frac_hg38!=null?", dominant covers "+(100*t.dom_frac_hg38).toFixed(0)+"% of the locus":""));
+  if(t.n_tu_overlap_t2t>1)  frag.push("t2t: spans "+t.n_tu_overlap_t2t+" units"+
+    (t.dom_frac_t2t!=null?", dominant covers "+(100*t.dom_frac_t2t).toFixed(0)+"% of the locus":""));
+  const warn = frag.length
+    ? '<div class="note">'+esc(frag.join(" \u00b7 "))+
+      ' \u2014 the locus is not coextensive with any single unit; the dominant unit is listed first</div>'
+    : '';
+  const rows=t.units.map(function(u){
+    return '<tr><td><span class="cid" style="font-size:13px">'+esc(u.tu_id)+'</span></td>'+
+      '<td>'+esc(u.group_call||"")+'<span class="note"> ('+esc(u.call_level||"")+')</span></td>'+
+      '<td>'+esc(u.verdict||"")+'</td>'+
+      '<td>'+esc(u.provenance||"")+'</td>'+
+      '<td>'+esc(u.assemblies||"")+'</td>'+
+      '<td>'+(u.internal_bp_hg38!=null?(+u.internal_bp_hg38).toLocaleString():
+              (u.internal_bp_t2t!=null?(+u.internal_bp_t2t).toLocaleString()+' <span class="note">(t2t)</span>':""))+'</td>'+
+      '<td>'+esc(u.evidence||"")+'</td>'+
+      '<td>'+(u.is_chimeric?'<b>chimeric</b> ':'')+esc(u.member_groups||"")+'</td></tr>';
+  }).join("");
+  return '<div class="panel"><h2>Transcriptional unit (v0.1)</h2>'+
+    '<div class="note">A separate assignment from the locus layer: units are built from '+
+    'element walks, so a locus may span several units and a unit may carry several loci. '+
+    'Cite the unit id only alongside the locus versioned_id.</div>'+warn+
+    '<table class="tbl" style="margin-top:8px"><thead><tr><th>unit</th><th>group call</th>'+
+    '<th>verdict</th><th>provenance</th><th>assemblies</th><th>internal bp</th>'+
+    '<th>evidence</th><th>member groups</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
 function render(d,h){
   if(!d){$("view").innerHTML='<div class="empty">locus not found in bundle</div>';return;}
   const hg=coordOf(d,"hg38"),t2=coordOf(d,"t2t"),g=d.group_info||{},st=d.structure||{},xg=d.crossgenome||{};
@@ -29,20 +70,25 @@ function render(d,h){
      '<div style="margin-top:9px">'+links+'</div></div>'+
    '<div class="two">'+
      '<div class="panel"><h2>Locus</h2><dl class="kv">'+
-       kv("clade",d.group)+kv("band",d.band)+kv("origin",d.origin)+
+       kv("group",d.group)+kv("band",d.band)+kv("origin",d.origin)+
        kv("structure",st.structure)+kv("category",st.category)+
        kv("LTR names",st.ltr_names)+kv("internal names",st.int_names)+
        kv("tandem/nested",st.is_tandem_or_nested?"yes":"no")+
        kv("segments",d.segments.length+(d.segments.length?"":" (none stored)"))+
      '</dl></div>'+
-     '<div class="panel"><h2>Clade — '+esc(d.group)+'</h2><dl class="kv">'+
+     '<div class="panel"><h2>Group — '+esc(d.group)+'</h2><dl class="kv">'+
        kv("superfamily",g.superfamily)+kv("HERV class",g.herv_class)+
-       kv("loci in clade",g.n_loci)+kv("int model",g.intModel)+
+       kv("loci in group",g.n_loci)+kv("int model",g.intModel)+
        kv("RepBase class",g.repbase_class)+kv("HERVd family",g.hervd_family)+
        kv("dominant LTR",g.dominant_ltr)+
        kv("with flanking LTR",g.frac_with_flanking_ltr==null?null:(100*g.frac_with_flanking_ltr).toFixed(1)+"%")+
        kv("extension verdict",g.extension_verdict)+
      '</dl></div></div>'+
+   tuPanel(d)+
+   // transcription evidence sits next to the TU panel: both describe what is
+   // transcribed here, and the split question reads them together
+   (typeof txPanel==="function"?txPanel(d):"")+
+   (typeof jxPanel==="function"?jxPanel(d):"")+
    '<div class="panel"><h2>Locus map ±1 kb ('+(gasm||"—")+')'+
      (gco&&gasm!=="hg38"?' <span class="note" style="font-weight:400">— hg38 coordinate absent;'+
        ' gene models, gEVE ORFs and HERVarium domains are hg38-only and are omitted</span>':"")+
@@ -64,6 +110,7 @@ function render(d,h){
      '<span><i style="background:var(--gene)"></i>gene exon (thick) / intron (thin)</span></div></div>'+
    '<div class="panel"><h2>Coordinates</h2>'+coordTable(d,xg)+'</div>'+
    '<div class="panel"><h2>Aliases — '+d.aliases.length+' rows</h2>'+aliasTable(d.aliases)+'</div>'+
+   hml2Panel(d.hml2_detail)+
    '<div class="panel"><h2>Dfam best alignment</h2>'+
      (dfb.consensus_name?'<dl class="kv">'+kv("consensus",dfb.consensus_name)+kv("accession",dfb.dfam_accession)+
        kv("% identity",dfb.pct_identity==null?null:Number(dfb.pct_identity).toFixed(1))+
@@ -88,6 +135,27 @@ function tbl(rows,cols){
   return "<table><tr>"+use.map(c=>"<th>"+esc(c)+"</th>").join("")+"</tr>"+
     rows.map(r=>"<tr>"+use.map(c=>'<td class="'+(typeof r[c]==="number"?"mono":"")+'">'+fmt(r[c])+"</td>").join("")+"</tr>").join("")+"</table>";
 }
+/* Subramanian 2011 HML-2 provirus detail. Only 87 of 39,733 loci carry this, so
+   the panel is omitted entirely rather than rendered empty. Coordinates shown are
+   the paper's own hg19 -- the hg38/T2T equivalents are already in the Coordinates
+   panel, and repeating them here would imply the paper published them. */
+function hml2Panel(rows){
+  if(!rows||!rows.length)return "";
+  return rows.map(r=>'<div class="panel"><h2>HML-2 provirus detail — '+
+    esc(r.subramanian_id||"")+'</h2><dl class="kv">'+
+    kv("estimated age (MYA)",r.estimated_age_mya)+
+    kv("oldest common ancestor",r.oldest_common_ancestor)+
+    kv("ORFs",r.orfs||"none reported")+
+    kv("polymorphic",r.polymorphic)+
+    kv("hg19 (as published)",r.chrom_hg19?r.chrom_hg19+":"+fmt(r.start_hg19)+"-"+fmt(r.end_hg19):null)+
+    kv("strand",r.strand)+
+    kv("mapping",r.map_status+(r.start_offset_bp!=null?" · start offset "+r.start_offset_bp+" bp":""))+
+    kv("source table",r.source_table==="T1"?"Table 1 (fairly intact)":"Table 2 (partial internal)")+
+    (r.is_tandem_partner?kv("note","one of a tandem pair sharing this locus"):"")+
+    '</dl><div class="note">Subramanian et al. 2011, Retrovirology 8:90 — '+
+    'coordinates lifted hg19→hg38 by two-way liftover consensus.</div></div>').join("");
+}
+
 function coordTable(d,xg){
   const rows=(d.coord||[]).map(c=>{
     const u=UCSC[c.assembly]; const pos=c.chrom+":"+(c.start+1)+"-"+c.end;
@@ -206,6 +274,30 @@ async function drawLocus_(d,co,asm){
       if(!mg.length) s+=lbl((x(Math.max(g.a,w0))+x(Math.min(g.b,w1)))/2,13,
           "intron only \u2014 no exon in window","#7a5c8f",7.5,"middle",true);
       return s;}});});
+  // Snaptron arc lane, hg38 only (srav3h has no t2t build). Unshifted so arcs sit
+  // above the feature lanes they span, matching the TU view's layout.
+  // Two possible sources, and only one is present per build (--debug-local decides).
+  // `arcs` = full records with exact sample counts; `pjx` = the bit-packed
+  // reference, which decodes to the same row shape. Debug is preferred when both
+  // somehow appear (a stale mixed bundle) because its values are exact.
+  //
+  // NOTE the two do not select the same junctions: `arcs` takes a flat top-CAP by
+  // support across the whole window, `pjx` takes top-15 with an end inside the
+  // element plus the single best spanning junction. The packed set is the
+  // element-relevant one -- it keeps in-element junctions the flat cap drops -- so a
+  // debug page and a public page legitimately show different arcs. The lane caption
+  // states which rule produced what is on screen.
+  let _arcsrc=null;
+  if(isHg){
+    if(d.arcs&&d.arcs.jx&&d.arcs.jx.length) _arcsrc=d.arcs;
+    else if(d.pjx&&d.pjx.w&&d.pjx.w.length&&typeof pjxDecode==="function")
+      _arcsrc=pjxDecode(d.pjx,co);
+  }
+  if(_arcsrc&&_arcsrc.jx.length&&typeof arcLane==="function"){
+    const AH=46;
+    lanes.unshift({label:"junctions",h:AH,draw:()=>arcLane(_arcsrc,x,w0,w1,AH)+
+      (typeof tssMarks==="function"?tssMarks((d.tx||{})[asm],co,x,co.strand):"")});
+  }
   let y=0,body="";
   lanes.forEach(ln=>{
     body+='<g transform="translate(0,'+y+')">'+
@@ -229,7 +321,21 @@ async function drawLocus_(d,co,asm){
       ' transcript in this window'+
       (Object.keys(gm).length?"":" (no "+asm+" gene models in bundle)")+"</div>")+
     (d.segments.length?"":'<div class="note">This locus has no stored RepeatMasker segments — '+
-      "only telescope-origin loci carry them. Bar shows the merged locus extent.</div>");
+      "only telescope-origin loci carry them. Bar shows the merged locus extent.</div>")+
+    // Legend for the arc lane. The classes and the quantisation are only meaningful
+    // for the packed source, so the caption states which source drew the lane and
+    // how many junctions were kept out of how many were considered.
+    (_arcsrc&&_arcsrc.jx.length?'<div class="note">junctions: '+
+      '<span style="color:'+JX_EDGE+'">━</span> one end in element  '+
+      '<span style="color:'+JX_WITHIN+'">━</span> both ends in element  '+
+      '<span style="color:'+JX_SPAN+'">━</span> element within intron  '+
+      '· dashed = antisense to locus'+
+      (_arcsrc.packed
+        ? " · Snaptron srav3h, strand-aware, canonical only; top 15 in-element + top "+
+          "spanning junction by sample count; support and depth log-quantised (\u00b14%)"
+        : " · Snaptron srav3h, top "+_arcsrc.shown+" of "+
+          _arcsrc.n_total.toLocaleString()+" by sample count, exact values")+
+      "</div>":"");
 }
 const rect=(x,y,w,h,f)=>'<rect x="'+x+'" y="'+y+'" width="'+Math.max(1,w)+'" height="'+h+'" fill="'+f+'" rx="1.5"/>';
 const line=(x1,y1,x2,y2,c,w,dash)=>'<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+

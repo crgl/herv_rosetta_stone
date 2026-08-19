@@ -45,8 +45,16 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
+# Subramanian 2011 (HML-2 only) contributes four types. `subramanian_id` uses the
+# HML2_ clade prefix so its band names never collide as bare strings with the
+# catalog's own combined_id -- but 6 of them still name a DIFFERENT locus than the
+# identically-spelled combined_id does (see table subramanian_alias_conflict).
+# The three K-series are kept distinct from ERVmap's K-numbers: ERVmap `K-10` and
+# `ERVK-10` are different loci, so merging the series would fabricate identities.
 IDENT = ["combined_id", "versioned_id", "telescope_id", "hervd_id",
-         "ervmap_id", "ervmap_alt_name"]
+         "ervmap_id", "ervmap_alt_name",
+         "subramanian_id", "hml2_k_number", "hml2_k_designation",
+         "hgnc_ervk_symbol"]
 CLASS = ["dfam_int_model", "dfam_accession", "repbase_name"]
 DETAIL_TABLES = ["locus_coord", "locus_segment", "locus_structure", "hit_geve",
                  "hit_hervarium_domain", "hit_hervarium_int", "hit_gene",
@@ -267,7 +275,135 @@ def build_fuzzy_index(al: pd.DataFrame, loc: pd.DataFrame) -> dict:
 
 # ---------------------------------------------------------------- stage 2
 
-def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int):
+def _btx():
+    """Import the sibling transcription module regardless of cwd."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import build_transcription as btx
+    return btx
+
+
+def _tx_payload(tu_db: str, jx_parquet: str, want_arcs: bool = True):
+    """(locus tx records, locus arcs) -- both {} when the inputs are absent.
+
+    Kept tolerant on purpose: the catalog database alone is enough to build a
+    working bundle, and the transcription layer is additive.
+
+    want_arcs=False skips the debug arc layer outright. Only --debug-local puts
+    `arcs` in a shard, and nothing else reads it (the validator does not), so in a
+    public build computing it is pure cost -- it dominated the shard stage."""
+    if not tu_db or not os.path.exists(tu_db):
+        log("  transcription        no TU database -- skipping tx/arc panels")
+        return {}, {}
+    btx = _btx()
+    cx = sqlite3.connect(tu_db)
+    tx = btx.locus_tx(cx)
+    log(f"  locus tx {len(tx):>6,} loci   | FANTOM5 TSS + splice status")
+    arcs = {}
+    if not want_arcs:
+        log("  locus arcs           skipped (public build -- packed `pjx` layer only)")
+    elif jx_parquet and os.path.exists(jx_parquet):
+        arcs = btx.locus_arcs(cx, jx_parquet)
+        capped = sum(1 for v in arcs.values() if v["n_total"] > v["shown"])
+        log(f"  locus arcs {len(arcs):>6,} loci | Snaptron hg38 | {capped:,} capped "
+            f"at top {btx.CAP} by support")
+    else:
+        log("  locus arcs           no Snaptron parquet -- tabulation only, no arcs")
+    return tx, arcs
+
+
+def _packed_jx_payload(con, jx_parquet: str) -> dict:
+    """{locus_uid: {"w": [uint64, ...], "n": pre-cap junction count}} or {}.
+
+    Kept tolerant like _tx_payload: the packed layer is additive, and a build
+    without the Snaptron parquet still produces a working bundle.
+    """
+    if not jx_parquet or not os.path.exists(jx_parquet):
+        log("  packed jx            no Snaptron parquet -- no packed arcs")
+        return {}
+    import pack_junctions as pjx
+    loci = pd.read_sql("SELECT locus_uid, chrom, start, end, strand FROM locus_coord "
+                       "WHERE assembly='hg38'", con).dropna(subset=["chrom", "start", "end"])
+    loci["start"] = loci.start.astype(int)
+    loci["end"] = loci.end.astype(int)
+    words, st, keep = pjx.build(jx_parquet, loci, canonical_only=True)
+    pre = keep.groupby("locus_uid").size().to_dict()
+    # Words go out as DECIMAL STRINGS, not JSON numbers: a 64-bit value exceeds
+    # Number.MAX_SAFE_INTEGER (2^53), so JSON.parse would round the top bits away
+    # and corrupt the donor offset. The JS side reads them with BigInt.
+    out = {u: {"w": [str(x) for x in w], "n": int(pre.get(u, len(w)))}
+           for u, w in words.items()}
+    log(f"  packed jx {st['loci']:>6,} loci | {st['junctions']:,} junctions | "
+        f"{st['antisense']:,} antisense | {st['saturated']} saturated | "
+        f"max {st['max_per_locus'] * 8} B/locus")
+    if st["saturated"]:
+        # 23/24-bit signed fields carry the observed offset range with headroom;
+        # a nonzero count means an assumption in pack_junctions has been violated.
+        log(f"  WARNING: {st['saturated']} junction offsets saturated a packed field")
+    return out
+
+
+def build_tu_shards(cat_con, out: str, tu_db: str, jx_parquet: str, nb: int):
+    """Stage 5, --debug-local only: per-unit shards for the TU detail view.
+
+    Deliberately gated. This roughly doubles bundle size, and a static host with a
+    size ceiling should carry the locus-centric public view only. The TU view is
+    the internal tool for adjudicating splits, so it lives in the debug bundle
+    where it can grow (UMAP neighbourhoods, per-unit read evidence) without
+    threatening what ships publicly.
+
+    Shards use the same djb2(key) % nb convention as the locus shards -- keyed on
+    tu_id -- so index.html resolves both with one code path."""
+    btx = _btx()
+    cx = sqlite3.connect(tu_db)
+    tx = btx.tu_tx(cx)
+    snap = btx.tu_snaptron(cx)
+    arcs = btx.tu_arcs(cx, cat_con, jx_parquet) if os.path.exists(jx_parquet) else {}
+    # members come from their own hg38/t2t-fallback pass, not from the arc payload:
+    # Snaptron is hg38-only but 15% of units exist only in t2t
+    mem = btx.tu_members(cx, cat_con)
+    ids = sorted(set(tx) | set(snap) | set(arcs) | set(mem))
+    log(f"  units {len(ids):>6,} | tx {len(tx):,} | snaptron {len(snap):,} | arcs {len(arcs):,}")
+    n_t2t = sum(1 for v in mem.values() if v["asm"] == "t2t")
+    n_nom = sum(1 for v in mem.values() if v.get("no_members"))
+    log(f"  member tracks {len(mem):>6,} | hg38 {len(mem)-n_t2t:,} + t2t fallback {n_t2t:,}")
+    n_rc = sum(1 for v in arcs.values() if v.get("recount"))
+    if n_rc:
+        log(f"  {n_rc:,} units: recomputed arc classes differ from the upstream "
+            f"summary counts -- both shown on the page")
+    if n_nom:
+        log(f"  {n_nom:,} units have NO tu_locus_member row (upstream gap) -- "
+            f"drawn as unmapped extent")
+    unanchored = sum(1 for v in arcs.values() if v.get("unanchored"))
+    if unanchored:
+        log(f"  {unanchored:,} chimeric units have window junctions but none "
+            f"element-to-element -- shown as unanchored")
+
+    shards = {}
+    for t in ids:
+        a = arcs.get(t, {})
+        m = mem.get(t, {})
+        shards.setdefault(djb2(t) % nb, {})[t] = {
+            "tu_id": t, "tx": tx.get(t, {}), "snaptron": snap.get(t, {}),
+            "arcs": a, "members": m.get("members", []),
+            "map_asm": m.get("asm"), "map_chrom": m.get("chrom"),
+            "extent": m.get("extent"), "no_members": bool(m.get("no_members")),
+        }
+    d = f"{out}/data/tu"
+    os.makedirs(d, exist_ok=True)
+    for stale in os.listdir(d):
+        os.remove(f"{d}/{stale}")
+    sizes = [dump_gz(v, f"{d}/{b}.json.gz") for b, v in shards.items()]
+    dump_json({"n_buckets": nb, "hash": "djb2_mod", "n_units": len(ids)},
+              f"{out}/data/tu_meta.json")
+    # the TU search keyspace: tu_id -> member locus uids, for the exact-match box
+    dump_gz({t: [x[0] for x in mem.get(t, {}).get("members", [])] for t in ids},
+            f"{out}/data/tu_index.json.gz")
+    log(f"  tu shards {len(shards)} | {sum(sizes)/1e6:.1f} MB | "
+        f"max {max(sizes)/1024:.0f} KB")
+
+
+def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int,
+                 tu_db: str = "", jx_parquet: str = "", debug: bool = False):
     grp = pd.read_sql('SELECT * FROM "group"', con).set_index("group")
     sf = pd.read_sql("SELECT * FROM superfamily", con).set_index("superfamily")
     tabs = {t: pd.read_sql(f"SELECT * FROM {t}", con) for t in DETAIL_TABLES}
@@ -277,8 +413,77 @@ def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int):
 
     byuid = {k: {u: d for u, d in v.groupby("locus_uid")} for k, v in tabs.items()}
     dby = {u: d for u, d in dbest.groupby("locus_uid")}
+    # optional table: absent from databases built before the Subramanian load
+    try:
+        hd = pd.read_sql("SELECT * FROM hml2_provirus_detail "
+                         "WHERE locus_uid IS NOT NULL", con)
+        hdby = {u: d for u, d in hd.groupby("locus_uid")}
+        log(f"  hml2_provirus_detail {len(hd):>4,} rows | {len(hdby)} loci")
+    except Exception:
+        hdby = {}
+        log("  hml2_provirus_detail  absent -- skipping panel")
     alby = {u: d for u, d in al.groupby("locus_uid")}
     rby = repeats_for(con, loc.locus_uid)
+    # transcription evidence (optional: needs the TU database and the Snaptron
+    # parquet; a public build without them simply omits the panels)
+    _txl, _arcl = _tx_payload(tu_db, jx_parquet, want_arcs=debug)
+    # Bit-packed junction reference for the NON-debug bundle.
+    #
+    # `arcs` above is the debug payload: full coordinates, strand and canonical
+    # flag per junction, capped at CAP by support. At ~36 MB across the shard set
+    # it is too large to ship, and it is built ONLY under --debug-local. `pjx`
+    # carries the same evidence as one 64-bit word per junction (see
+    # pack_junctions for the layout) at ~128 B/locus worst case, and is what the
+    # public bundle draws from. Exactly one of the two is populated per build.
+    _pjx = _packed_jx_payload(con, jx_parquet)
+    # v0.1 transcriptional-unit layer for the LOCUS page's unit panel.
+    #
+    # These tables live in the TU database, not the catalogue, and the crosswalk is
+    # named locus_v1_to_tu_v01 (not locus_tu). The original read looked for both in
+    # `con` under the wrong name, so the except branch fired on every build and the
+    # locus-page unit panel had never once rendered -- a silent skip, logged as if
+    # the layer were legitimately absent. Read from tu_db, and log the miss loudly
+    # enough that a genuinely absent layer is distinguishable from a wrong lookup.
+    _tu, _ltby = None, {}
+    if tu_db and os.path.exists(tu_db):
+        tcon = sqlite3.connect(tu_db)
+        try:
+            _tu = pd.read_sql("SELECT * FROM tu", tcon).set_index("tu_id")
+            _lt = pd.read_sql("SELECT * FROM locus_v1_to_tu_v01", tcon)
+            _ltby = {u: d for u, d in _lt.groupby("locus_uid")}
+            log(f"  tu layer {len(_tu):>6,} units | {len(_ltby):,} loci crosswalked")
+        except Exception as e:
+            log(f"  tu layer  UNAVAILABLE in {tu_db}: {type(e).__name__}: {e}")
+        finally:
+            tcon.close()
+    else:
+        log("  tu layer             no --tu-db given -- omitting unit panel")
+
+    def tu_for(u):
+        if _tu is None:
+            return {}
+        d = _ltby.get(u)
+        if d is None or not len(d):
+            return {}
+        r = d.iloc[0]
+        out = {"in_v01": bool(r.get("in_v01")),
+               "n_tu_overlap_hg38": (None if pd.isna(r.get("n_tu_overlap")) else int(r["n_tu_overlap"])),
+               "dom_frac_hg38": (None if pd.isna(r.get("dom_frac")) else round(float(r["dom_frac"]), 3)),
+               "n_tu_overlap_t2t": (None if pd.isna(r.get("n_tu_t2t")) else int(r["n_tu_t2t"])),
+               "dom_frac_t2t": (None if pd.isna(r.get("dom_frac_t2t")) else round(float(r["dom_frac_t2t"]), 3)),
+               "units": []}
+        seen = set()
+        for col, asm in (("tu_id_hg38", "hg38"), ("tu_id_t2t", "t2t")):
+            tid = r.get(col)
+            if tid is None or pd.isna(tid) or tid in seen:
+                continue
+            seen.add(tid)
+            if tid in _tu.index:
+                rec = _tu.loc[tid].to_dict()
+                rec["tu_id"] = tid
+                rec["matched_via"] = asm
+                out["units"].append(json.loads(pd.Series(rec).to_json()))
+        return out
 
     GKEYS = ("superfamily", "herv_class", "n_loci", "intModel", "repbase_class",
              "hervd_family", "dfam_accession", "dominant_ltr",
@@ -313,7 +518,28 @@ def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int):
                             drop=("locus_uid", "resource_key", "telescope_id")),
             "hervarium_int": recs(byuid["hit_hervarium_int"].get(u)),
             "genes": recs(byuid["hit_gene"].get(u)),
+            "tu": tu_for(u),
+            # FANTOM5 TSS/splice status per assembly, and Snaptron arcs (hg38 only,
+            # capped -- see build_transcription for the tri-state and cap semantics)
+            "tx": _txl.get(u, {}),
+            # Two junction payloads, and only ONE ships in a given build.
+            #
+            #   pjx   -- bit-packed, 8 B/junction, always present. What the public
+            #            bundle draws from.
+            #   arcs  -- full uncapped-coordinate records with exact sample counts,
+            #            --debug-local ONLY. It is ~36 MB across the shard set, which
+            #            is the entire cost the packing exists to avoid; shipping both
+            #            would make the packed layer pure overhead.
+            #
+            # The renderer prefers `arcs` when present, so a debug build still shows
+            # exact values while the public build shows the log-quantised ones.
+            # `_arcl` is empty unless debug, so this is {} in a public build.
+            "arcs": _arcl.get(u, {}),
+            "pjx": _pjx.get(u, {}),
             "crossgenome": (recs(byuid["aln_crossgenome"].get(u)) or [{}])[0],
+            # Subramanian 2011 HML-2 detail: age / ORFs / polymorphism. Present for
+            # 87 loci only -- the detail view omits the panel when absent.
+            "hml2_detail": recs(hdby.get(u)),
             "dfam_best": recs(dby.get(u)),
             "repeats": rby.get(u, []),
         }
@@ -531,7 +757,7 @@ def repeats_for(con, uid_order):
     return by
 
 
-def validate(out: str) -> bool:
+def validate(out: str, debug: bool = False) -> bool:
     ok = True
     idx = json.load(gzip.open(f"{out}/data/search_index.json.gz", "rt"))
     nb = json.load(open(f"{out}/data/shard_meta.json"))["n_buckets"]
@@ -618,6 +844,7 @@ def validate(out: str) -> bool:
     # graphic coverage: hg38 preferred, t2t fallback. detail.js draws whenever EITHER
     # exists, so counting hg38 only (as this did before the t2t lane) understates it.
     n_hg = n_t2 = n_none = n_rep = n_repasm = 0
+    n_pjx = n_arc = n_both = 0
     for b in range(nb):
         if not os.path.exists(f"{out}/data/loci/{b}.json.gz"):
             continue
@@ -636,8 +863,25 @@ def validate(out: str) -> bool:
                 # coordinate on, else it would be drawn against the wrong window
                 if not {r["assembly"] for r in reps} <= asms:
                     n_repasm += 1
+            has_p = bool((d.get("pjx") or {}).get("w"))
+            has_a = bool((d.get("arcs") or {}).get("jx"))
+            n_pjx += has_p
+            n_arc += has_a
+            n_both += has_p and has_a
     log(f"  graphic: hg38 {n_hg:,} | t2t fallback {n_t2:,} | none {n_none:,}")
     log(f"  repeats present for {n_rep:,} loci")
+
+    # Junction payloads. A --debug-local build legitimately carries both (exact
+    # records for inspection, packed for testing the shipped path). A PUBLIC build
+    # carrying `arcs` means the debug gate regressed and the packed layer has become
+    # pure overhead -- the specific bug this check exists to catch, since the page
+    # renders correctly either way and nothing else would notice the size.
+    log(f"  junction payload: packed {n_pjx:,} loci | debug arcs {n_arc:,} loci"
+        + ("  (debug build -- both expected)" if debug else ""))
+    if n_arc and not debug:
+        ok = False
+        log(f"  FAIL {n_arc:,} loci ship debug `arcs` in a non-debug build -- the "
+            f"--debug-local gate has regressed; packed layer is redundant overhead")
     if n_repasm:
         ok = False
         log(f"  FAIL {n_repasm:,} loci carry repeats for an assembly they have no "
@@ -686,6 +930,14 @@ def main(argv=None):
                     help="parsed hs1 transcript cache (reused if present)")
     ap.add_argument("--gene-parquet", default="gencode_v50_models.parquet",
                     help="reused if present, else written after fetch")
+    ap.add_argument("--tu-db", default="herv_tu_v0.1.db",
+                    help="TU/transcription database; panels are skipped if absent")
+    ap.add_argument("--jx-parquet", default="snaptron_srav3h_jx_sc10.parquet",
+                    help="Snaptron srav3h junctions at samples_count>=10 (hg38)")
+    ap.add_argument("--debug-local", action="store_true",
+                    help="also write the per-TU shard set and TU detail route "
+                         "(stage 5). Roughly doubles bundle size -- intended for "
+                         "local/internal use, not the size-capped public host.")
     ap.add_argument("--skip-index", action="store_true")
     ap.add_argument("--skip-shards", action="store_true")
     ap.add_argument("--skip-genes", action="store_true")
@@ -699,7 +951,7 @@ def main(argv=None):
 
     if a.validate_only:
         log("[validate]")
-        return 0 if validate(a.out) else 1
+        return 0 if validate(a.out, debug=a.debug_local) else 1
 
     t0 = time.time()
     loc = al = None
@@ -713,13 +965,17 @@ def main(argv=None):
                               'origin FROM locus', con)
             al = pd.read_sql("SELECT locus_uid,alias,alias_type,assignment,is_current "
                              "FROM locus_alias", con)
-        build_shards(con, a.out, loc, al, a.buckets)
+        build_shards(con, a.out, loc, al, a.buckets, a.tu_db, a.jx_parquet,
+                     debug=a.debug_local)
+    if a.debug_local:
+        log("[5/5] TU shards (--debug-local)")
+        build_tu_shards(con, a.out, a.tu_db, a.jx_parquet, a.buckets)
     if not a.skip_genes:
         log(f"[3/4] gene models ({a.gencode})")
         build_gene_models(con, a.out, a.gencode, a.gene_cache, a.gene_parquet,
                           a.hs1_gtf, a.hs1_parquet)
     log("[4/4] validate")
-    good = validate(a.out)
+    good = validate(a.out, debug=a.debug_local)
     log(f"\n{'OK' if good else 'FAILED'} in {time.time()-t0:.0f}s -> {a.out}/")
     if good:
         log(f"serve with:  cd {a.out} && python -m http.server 8000")
