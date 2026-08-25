@@ -54,11 +54,54 @@ import pandas as pd
 IDENT = ["combined_id", "versioned_id", "telescope_id", "hervd_id",
          "ervmap_id", "ervmap_alt_name",
          "subramanian_id", "hml2_k_number", "hml2_k_designation",
-         "hgnc_ervk_symbol"]
+         "hgnc_ervk_symbol",
+         "missillac_id", "rbrt_id"]
 CLASS = ["dfam_int_model", "dfam_accession", "repbase_name"]
 DETAIL_TABLES = ["locus_coord", "locus_segment", "locus_structure", "hit_geve",
                  "hit_hervarium_domain", "hit_hervarium_int", "hit_gene",
                  "aln_crossgenome"]
+# ---------------------------------------------------------------------------
+# Catalog completeness manifest.
+#
+# herv_catalog.db is stored with `working_data` retention: only the latest copy
+# survives, so a rebuild that omits a hand-loaded table cannot be recovered
+# from artifacts. That happened once -- a leaner 24-table rebuild became the
+# latest, dropping the Subramanian 2011 load (196 locus_alias rows +
+# hml2_provirus_detail). The dashboard kept building and shipped four
+# identifier groups with zero members for two releases.
+#
+# Each entry is (table, expected_min_rows, predicate_sql). The build asserts
+# these before doing any work and fails loudly on a shortfall. Update the
+# expected counts deliberately when a layer legitimately grows.
+CATALOG_MANIFEST = [
+    ("locus",                39_733, None),
+    ("locus_alias",         460_090, None),
+    ("locus_alias",              196, "source='subramanian2011'"),
+    ("hml2_provirus_detail",      91, None),
+    ("subramanian_alias_conflict", 6, None),
+    ("locus_repeat",        680_174, None),
+    ("locus_coord",           36_746, "assembly='hg38'"),
+    ("resource_registry",         1, "resource_key='subramanian2011'"),
+    ("missillac_record",     149_057, None),
+    ("missillac_locus_map",   33_465, None),
+    ("missillac_locus_map",   26_143, "is_primary=1"),
+    ("missillac_lineage_group",   83, None),
+    ("locus_alias",           52_286, "source='ERV Navigator'"),
+    ("resource_registry",          1, "resource_key='ervnav'"),
+    # Splice-tier ladder. The row count is the whole catalog because the table
+    # carries the negative and non-assessable states explicitly rather than by
+    # absence -- a locus missing from it would be indistinguishable from one
+    # with no junction evidence, which is the distinction the layer exists for.
+    ("locus_splice_tier",      39_733, None),
+    ("locus_splice_tier",      35_396, "tier NOT IN ('none','not_assessable')"),
+    ("group_lineage_dominant",     93, None),
+    ("resource_registry",           1, "resource_key='snaptron_splice_tier'"),
+]
+# Every manifest entry is fatal by default -- that is the point. A build from a
+# deliberately leaner catalog must say so explicitly with --allow-incomplete,
+# which downgrades shortfalls to warnings and stamps the bundle metadata so an
+# incomplete build is identifiable after the fact.
+
 PAD = 1000          # graphic window padding, must match PAD in detail.js
 N_BUCKETS = 400
 TILE = 2_000_000    # UCSC query tile size
@@ -66,6 +109,115 @@ DEFAULT_TRACK = "wgEncodeGencodeCompV50"
 
 
 # ---------------------------------------------------------------- primitives
+
+def _has_table(con, name: str) -> bool:
+    """True if `name` exists as a table or view in the connected database."""
+    return con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name=?",
+        (name,)).fetchone() is not None
+
+
+# ---------------------------------------------------------------------------
+# Evidence-layer input files.
+#
+# CATALOG_MANIFEST protects tables INSIDE the catalog. It cannot see the
+# side-car parquet/db files that supply the arc, mappability, CAGE and TU
+# layers -- those are passed as paths, and every one of the loaders is
+# deliberately tolerant so a public build without them still works.
+#
+# That tolerance hid a real regression: --jx-parquet defaulted to a filename
+# that never existed, so a default invocation logged one quiet
+# "no Snaptron parquet" line and shipped a bundle with zero arcs. The catalog
+# manifest passed, the validator passed, and the loss was invisible until a
+# human noticed the arcs were gone from the rendered page.
+#
+# Each entry is (arg_name, attr, layer description). A missing file is now
+# reported as a block and is FATAL unless --allow-missing-layers is passed,
+# which downgrades to warnings and stamps the bundle metadata.
+OPTIONAL_INPUTS = [
+    ("--jx-parquet", "jx_parquet", "packed junction arcs (splicing evidence)"),
+    ("--iv-parquet", "iv_parquet", "mappability interval blocks + junction anchor bit"),
+    ("--f5-parquet", "f5_parquet", "FANTOM5 CAGE lane"),
+    ("--tu-db",      "tu_db",      "transcription-unit panel"),
+]
+
+
+def check_inputs(args, allow_missing: bool = False) -> dict:
+    """Report presence of every evidence-layer input file.
+
+    Fatal on any miss unless allow_missing is set. This is the file-level twin
+    of check_catalog: the tolerant loaders stay tolerant (a deliberate lean
+    build is still possible), but silence is no longer the default.
+    """
+    report, missing = [], []
+    for arg, attr, desc in OPTIONAL_INPUTS:
+        path = getattr(args, attr, "") or ""
+        ok = bool(path) and os.path.exists(path)
+        report.append({"arg": arg, "path": path, "present": ok, "layer": desc})
+        log(f"{'  ' if ok else '!!'} {arg:<14s} {('ok  ' if ok else 'MISSING')} "
+            f"{path or '(unset)':<44s} {desc}")
+        if not ok:
+            missing.append(f"{arg} -> {path or '(unset)'}: {desc}")
+
+    if missing:
+        if not allow_missing:
+            log("")
+            log("EVIDENCE LAYER INPUT MISSING -- refusing to build:")
+            for m in missing:
+                log("   " + m)
+            log("")
+            log("These layers are additive, so the build would otherwise succeed")
+            log("and ship a bundle silently missing them -- which is exactly how")
+            log("the v0.7 arc regression happened. Supply the files, or pass")
+            log("--allow-missing-layers if a lean bundle is deliberate.")
+            raise SystemExit("evidence layer input missing; pass --allow-missing-layers")
+        log(f"!! building WITHOUT {len(missing)} evidence layer(s) (--allow-missing-layers)")
+    return {"inputs": report, "complete": not missing,
+            "allow_missing_layers": bool(allow_missing)}
+
+
+def check_catalog(con, allow_incomplete: bool = False) -> dict:
+    """Assert CATALOG_MANIFEST against the connected catalog.
+
+    Returns a manifest report dict (embedded in bundle metadata). Raises
+    SystemExit on any shortfall unless allow_incomplete is set.
+    """
+    report, problems = [], []
+    for table, want, pred in CATALOG_MANIFEST:
+        label = table + (f" [{pred}]" if pred else "")
+        if not _has_table(con, table):
+            report.append({"check": label, "expected": want, "got": None,
+                           "status": "MISSING TABLE"})
+            problems.append(f"{label}: table absent (expected >= {want:,} rows)")
+            continue
+        sql = f"SELECT COUNT(*) FROM {table}" + (f" WHERE {pred}" if pred else "")
+        got = con.execute(sql).fetchone()[0]
+        ok = got >= want
+        report.append({"check": label, "expected": want, "got": got,
+                       "status": "ok" if ok else "SHORT"})
+        if not ok:
+            problems.append(f"{label}: {got:,} rows, expected >= {want:,}")
+
+    for r in report:
+        mark = "  " if r["status"] == "ok" else "!!"
+        log(f"{mark} {r['check']:<44s} {str(r['got'] or '-'):>9s} / {r['expected']:>9,}")
+
+    if problems:
+        if not allow_incomplete:
+            log("")
+            log("CATALOG INCOMPLETE -- refusing to build:")
+            for p in problems:
+                log("   " + p)
+            log("")
+            log("The catalog is stored with `working_data` retention, so a rebuild")
+            log("that drops a table cannot be restored from artifact history. Fix")
+            log("the catalog, or pass --allow-incomplete if this is deliberate.")
+            raise SystemExit(2)
+        log(f"!! {len(problems)} manifest shortfall(s), continuing under "
+            f"--allow-incomplete")
+    return {"checks": report, "problems": problems,
+            "complete": not problems, "allow_incomplete": bool(allow_incomplete)}
+
 
 def djb2(s: str) -> int:
     """Shard hash. Mirrored byte-for-byte in index.html; see module docstring."""
@@ -87,9 +239,18 @@ def _clean(o):
 
 
 def dump_gz(obj, path: str) -> int:
-    """Write gzipped JSON. allow_nan=False turns NaN leakage into an exception."""
-    with gzip.open(path, "wt") as fh:
-        json.dump(_clean(obj), fh, separators=(",", ":"), allow_nan=False, default=str)
+    """Write gzipped JSON. allow_nan=False turns NaN leakage into an exception.
+
+    mtime=0 is load-bearing: gzip stamps the wall clock into its header by
+    default, so two builds of identical content produced different checksums
+    and could not be compared byte-for-byte. Fixing the stamp makes the
+    release/debug index comparison a plain cmp.
+    """
+    payload = json.dumps(_clean(obj), separators=(",", ":"),
+                         allow_nan=False, default=str).encode()
+    with open(path, "wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as fh:
+            fh.write(payload)
     return os.path.getsize(path)
 
 
@@ -97,6 +258,10 @@ def dump_json(obj, path: str) -> int:
     with open(path, "w") as fh:
         json.dump(_clean(obj), fh, separators=(",", ":"), allow_nan=False, default=str)
     return os.path.getsize(path)
+
+
+MAPPABILITY_PAD = 1000   # bp of flank whose mappability blocks are shipped
+PAD_F5 = 1000            # bp of flank whose FANTOM5 CAGE peak marks are shipped
 
 
 def log(msg):
@@ -146,7 +311,10 @@ def build_search_index(con, out: str) -> pd.DataFrame:
     # explicitly selects the internal-key option (last in the dropdown).
     listmeta = build_list_meta(con, loc, fuzzy["uids"])
 
+    misidx = build_missillac_index(con)
+
     n = dump_gz({"classifier": clsidx, "fuzzy": fuzzy, "listmeta": listmeta,
+                 "missillac": misidx,
                  "uid2cid": dict(zip(loc.locus_uid, loc.combined_id)),
                  "uid2group": dict(zip(loc.locus_uid, loc["group"])),
                  "meta": {"n_loci": len(loc), "ident_types": IDENT, "class_types": CLASS}},
@@ -273,6 +441,45 @@ def build_fuzzy_index(al: pd.DataFrame, loc: pd.DataFrame) -> dict:
             "ckeys": ckeys, "cmap": [coll[c] for c in ckeys]}
 
 
+def build_missillac_index(con) -> dict:
+    """Search lane for ERV Navigator records that resolve to NO catalog locus.
+
+    The ~120k solo LTRs with no overlapping locus are deliberately not loci (they
+    would quadruple the catalog and re-letter the positional keyspace), so they
+    carry no locus_alias row and cannot appear in the uid-indexed fuzzy postings.
+    Without this lane a user pasting a perfectly valid Missillac ID gets nothing
+    back, which reads as a broken index rather than an out-of-scope record.
+
+    Postings here resolve to a record row, not a locus: the UI shows category,
+    coordinates and an outbound ERV Navigator link, badged as 'no catalog locus'.
+    Mapped records are excluded -- they already resolve through the locus path.
+    """
+    if not _has_table(con, "missillac_record"):
+        log("  missillac index       ABSENT (declared optional in manifest)")
+        return {}
+    rec = pd.read_sql("""
+        SELECT r.missillac_id, r.rbrt_id, r.category, r.lineage_id,
+               r.chrom_hg38, r.start_hg38, r.end_hg38, r.url
+        FROM missillac_record r
+        WHERE r.missillac_id NOT IN (SELECT missillac_id FROM missillac_locus_map)
+        ORDER BY r.missillac_id""", con)
+    cats = sorted(rec.category.dropna().unique())
+    cat_ix = {c: i for i, c in enumerate(cats)}
+    rows = [[r.missillac_id, r.rbrt_id, cat_ix.get(r.category, -1), r.lineage_id,
+             r.chrom_hg38, (None if pd.isna(r.start_hg38) else int(r.start_hg38)),
+             (None if pd.isna(r.end_hg38) else int(r.end_hg38)), r.url]
+            for r in rec.itertuples()]
+    post = defaultdict(list)
+    for i, r in enumerate(rec.itertuples()):
+        for tok in (r.missillac_id, r.rbrt_id):
+            if tok:
+                post[nrm(str(tok))].append(i)
+    keys = sorted(post)
+    log(f"  missillac unmapped {len(rows):>7,} records | {len(keys):,} fuzzy keys")
+    return {"cats": cats, "rows": rows, "keys": keys,
+            "post": [post[k] for k in keys]}
+
+
 # ---------------------------------------------------------------- stage 2
 
 def _btx():
@@ -311,7 +518,96 @@ def _tx_payload(tu_db: str, jx_parquet: str, want_arcs: bool = True):
     return tx, arcs
 
 
-def _packed_jx_payload(con, jx_parquet: str) -> dict:
+def _splice_tier_payload(con) -> dict:
+    """{locus_uid: {"t": tier, "d": detail, "sc": max_sample_count}}.
+
+    Asserted present rather than tolerated: unlike the drawn evidence lanes,
+    this is a per-locus summary line that a reader will take as a statement
+    about the locus. A silently absent layer here would render as "no splicing
+    evidence" on 35,396 loci that have it -- indistinguishable from a real
+    negative, which is the failure mode the tri-state tier exists to prevent.
+    """
+    if not _has_table(con, "locus_splice_tier"):
+        raise SystemExit("locus_splice_tier missing -- build the splice layer "
+                         "or remove it from CATALOG_MANIFEST deliberately")
+    df = pd.read_sql("SELECT locus_uid, tier, detail, max_sc FROM locus_splice_tier", con)
+    log(f"  splice tier          {len(df):,} loci | "
+        + " ".join(f"{k}={v:,}" for k, v in df.tier.value_counts().items()))
+    return {r.locus_uid: {"t": r.tier, "d": r.detail, "sc": r.max_sc}
+            for r in df.itertuples()}
+
+
+def _fantom5_payload(con, pk_parquet: str = ""):
+    """Per-locus FANTOM5 CAGE evidence: window counts from locus_fantom5, plus
+    the individual dominant-TSS positions so the lane draws real peak marks
+    rather than a summary bar.
+
+    This resource shares primary data with FANTOM CAT (CAT clusters are built
+    from FANTOM5 CAGE), so the renderer labels it as non-independent: agreement
+    between the two CAGE lanes is one observation, not two.
+
+    Single tier by design -- the distributed peak set is already thresholded
+    (only 171 of 209,911 peaks fall below 1 TPM in every library), so sample
+    breadth is carried as a continuous value instead of a tier name. A locus
+    with assessable=0 (alt/random contig carrying no peaks) yields an explicit
+    null so "not measured here" stays distinct from "measured as zero".
+    """
+    try:
+        lf = pd.read_sql("SELECT * FROM locus_fantom5", con)
+    except Exception as exc:
+        log(f"  fantom5: absent ({exc.__class__.__name__}) -- lane omitted")
+        return {}, {}
+    stats = defaultdict(dict)
+    for r in lf.itertuples():
+        if int(r.assessable) == 0:
+            stats[r.locus_uid][str(r.asm)] = {"no_data": 1}
+            continue
+        stats[r.locus_uid][str(r.asm)] = {
+            "no_data": 0,
+            "body": int(r.body_sense_n), "fkb": int(r.fkb_sense_n),
+            "up": int(r.up_sense_n), "anti": int(r.body_anti_n),
+            "max_tpm": (None if pd.isna(r.body_sense_max_tpm)
+                        else round(float(r.body_sense_max_tpm), 2)),
+            "breadth": (None if pd.isna(r.body_sense_breadth_n_ge1)
+                        else int(r.body_sense_breadth_n_ge1)),
+            "d5p": (None if pd.isna(r.tss5p_dist) else int(r.tss5p_dist)),
+            "top": (None if (r.body_sense_top_sample is None
+                             or pd.isna(r.body_sense_top_sample))
+                    else str(r.body_sense_top_sample)[:60]),
+            "new": int(r.body_sense_n_new_peaks),
+        }
+    marks = defaultdict(dict)
+    if pk_parquet and os.path.exists(pk_parquet):
+        pk = pd.read_parquet(pk_parquet)
+        idx = {}
+        for (asm, c), g in pk.groupby(["assembly", "chrom"], observed=True):
+            g = g.sort_values("tss")
+            idx[(str(asm), str(c))] = g
+        co = pd.read_sql(
+            "SELECT locus_uid,assembly,chrom,start,end,strand FROM locus_coord", con)
+        for r in co.itertuples():
+            if pd.isna(r.chrom) or pd.isna(r.start):
+                continue
+            g = idx.get((str(r.assembly), str(r.chrom)))
+            if g is None:
+                continue
+            s = max(0, int(r.start) - PAD_F5)
+            e = int(r.end) + PAD_F5
+            tp = g.tss.to_numpy()
+            i = int(np.searchsorted(tp, s, "left"))
+            j = int(np.searchsorted(tp, e, "left"))
+            if j <= i:
+                continue
+            sub = g.iloc[i:j]
+            # [pos, sense(1/0), log10-ish tpm, breadth, hg38-native flag]
+            marks[r.locus_uid][str(r.assembly)] = [
+                [int(t), int(sd == str(r.strand)), round(float(mt), 1), int(nb), int(sc == "hg38")]
+                for t, sd, mt, nb, sc in zip(sub.tss, sub.strand, sub.max_tpm,
+                                             sub.n_ge1, sub.src)]
+    return dict(stats), dict(marks)
+
+
+def _packed_jx_payload(con, jx_parquet: str, iv_parquet: str = "") -> dict:
     """{locus_uid: {"w": [uint64, ...], "n": pre-cap junction count}} or {}.
 
     Kept tolerant like _tx_payload: the packed layer is additive, and a build
@@ -325,7 +621,18 @@ def _packed_jx_payload(con, jx_parquet: str) -> dict:
                        "WHERE assembly='hg38'", con).dropna(subset=["chrom", "start", "end"])
     loci["start"] = loci.start.astype(int)
     loci["end"] = loci.end.astype(int)
-    words, st, keep = pjx.build(jx_parquet, loci, canonical_only=True)
+    # pm151 supplies the anchor-mappable bit. Panmask is hg38-only, which is fine
+    # here: the srav3h junction set is hg38-only too. Without it the bit would be
+    # 0 everywhere, indistinguishable from "measured unmappable", so the build
+    # asserts below that it was actually measured.
+    anchor_iv = None
+    if iv_parquet and os.path.exists(iv_parquet):
+        _iv = pd.read_parquet(iv_parquet)
+        anchor_iv = _iv[(_iv.resource == "pm151") & (_iv.assembly == "hg38")][
+            ["chrom", "start", "end"]].copy()
+        anchor_iv["chrom"] = anchor_iv.chrom.astype(str)
+    words, st, keep = pjx.build(jx_parquet, loci, canonical_only=True,
+                                anchor_intervals=anchor_iv)
     pre = keep.groupby("locus_uid").size().to_dict()
     # Words go out as DECIMAL STRINGS, not JSON numbers: a 64-bit value exceeds
     # Number.MAX_SAFE_INTEGER (2^53), so JSON.parse would round the top bits away
@@ -335,6 +642,15 @@ def _packed_jx_payload(con, jx_parquet: str) -> dict:
     log(f"  packed jx {st['loci']:>6,} loci | {st['junctions']:,} junctions | "
         f"{st['antisense']:,} antisense | {st['saturated']} saturated | "
         f"max {st['max_per_locus'] * 8} B/locus")
+    log(f"  anchor bit           {st['anchor_ok']:,} set ({100 * st['anchor_ok'] / max(st['junctions'], 1):.1f}%)"
+        f" | {st['anchor_nodata']:,} without pm151 coverage")
+    if anchor_iv is not None and st["anchor_nodata"]:
+        # A clear bit must mean "neither anchor easy", never "no data". Measured
+        # over all 1,425,453 distinct junctions this count is zero, so a nonzero
+        # value means the interval reference no longer covers the junction set.
+        raise AssertionError(
+            f"FAIL: {st['anchor_nodata']:,} junctions have an anchor window on a "
+            f"contig pm151 does not cover -- a clear anchor bit would be ambiguous")
     if st["saturated"]:
         # 23/24-bit signed fields carry the observed offset range with headroom;
         # a nonzero count means an assumption in pack_junctions has been violated.
@@ -402,9 +718,82 @@ def build_tu_shards(cat_con, out: str, tu_db: str, jx_parquet: str, nb: int):
         f"max {max(sizes)/1024:.0f} KB")
 
 
+def _mappability_payload(con, loc: pd.DataFrame, iv_parquet: str = ""):
+    """Per-locus mappability: summary stats from the catalogue, plus the raw
+    intervals clipped to the drawn window so the lane can be drawn as blocks.
+
+    Two resources on hg38 (pm151 Panmask "easy", Umap k100 unique) and one on
+    T2T (Umap k100 -- Panmask has no T2T release).  Intervals are clipped to
+    locus +/- MAPPABILITY_PAD rather than shipped whole: an easy region can run
+    to 75 kb, and only the drawn window is ever needed.
+
+    A resource with `no_data` for a locus (alt/scaffold contigs, which none of
+    the three interval sets cover) yields an explicit null-fraction row so the
+    renderer can distinguish "not measured here" from "measured as unmappable".
+    """
+    try:
+        lm = pd.read_sql("SELECT * FROM locus_mappability", con)
+    except Exception as exc:
+        log(f"  mappability: absent ({exc.__class__.__name__}) -- lane omitted")
+        return {}, {}
+    stats = defaultdict(dict)
+    for r in lm.itertuples():
+        stats[r.locus_uid][f"{r.resource}_{r.assembly}"] = {
+            "frac": (None if pd.isna(r.mappable_frac) else round(float(r.mappable_frac), 4)),
+            "cov": (None if pd.isna(r.covered_bp) else int(r.covered_bp)),
+            "blocks": (None if pd.isna(r.n_blocks) else int(r.n_blocks)),
+            "longest_unmap": (None if pd.isna(r.longest_unmappable) else int(r.longest_unmappable)),
+            "t5": (None if pd.isna(r.term5_mappable) else int(r.term5_mappable)),
+            "t3": (None if pd.isna(r.term3_mappable) else int(r.term3_mappable)),
+            "no_data": int(r.no_data),
+        }
+    blocks = defaultdict(dict)
+    if iv_parquet and os.path.exists(iv_parquet):
+        iv = pd.read_parquet(iv_parquet)
+        idx = {}
+        for (rs, asm, c), g in iv.groupby(["resource", "assembly", "chrom"], observed=True):
+            g = g.sort_values("start")
+            idx[(str(rs), str(asm), str(c))] = (g.start.to_numpy(), g.end.to_numpy())
+        # `loc` is the search-index frame and carries no coordinates; the padded
+        # windows come from locus_coord, which is keyed by (locus_uid, assembly)
+        # and is what every other coordinate lane in this builder reads.
+        co = pd.read_sql("SELECT locus_uid,assembly,chrom,start,end FROM locus_coord", con)
+        for r in co.itertuples():
+            if pd.isna(r.chrom) or pd.isna(r.start):
+                continue
+            s = max(0, int(r.start) - MAPPABILITY_PAD)
+            e = int(r.end) + MAPPABILITY_PAD
+            asm = str(r.assembly)
+            for rs in ("pm151", "umap100"):
+                t = idx.get((rs, asm, str(r.chrom)))
+                if t is None:
+                    continue
+                st, en = t
+                i = int(np.searchsorted(en, s, "right"))
+                j = int(np.searchsorted(st, e, "left"))
+                if j <= i:
+                    blocks[r.locus_uid][f"{rs}_{asm}"] = []
+                    continue
+                blocks[r.locus_uid][f"{rs}_{asm}"] = [
+                    [int(max(a, s)), int(min(b, e))] for a, b in zip(st[i:j], en[i:j])]
+    return dict(stats), dict(blocks)
+
+
 def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int,
-                 tu_db: str = "", jx_parquet: str = "", debug: bool = False):
+                 tu_db: str = "", jx_parquet: str = "", debug: bool = False,
+                 iv_parquet: str = "", f5_parquet: str = ""):
     grp = pd.read_sql('SELECT * FROM "group"', con).set_index("group")
+    # Group-level dominant Navigator lineage. Carried WITH its share and the
+    # group's lineage count, never bare: lineage and group are many-to-many
+    # (median 8 lineages per group, max 51), and only 21 of 93 groups have a
+    # lineage covering >=80% of their loci. A bare value would read as an
+    # equivalence the data does not support.
+    if _has_table(con, "group_lineage_dominant"):
+        _gld = pd.read_sql("SELECT grp, dom_lineage, dom_frac, n_lineages "
+                           "FROM group_lineage_dominant", con).set_index("grp")
+        grp = grp.join(_gld, how="left")
+    else:
+        log("  group lineage        ABSENT (declared optional in manifest)")
     sf = pd.read_sql("SELECT * FROM superfamily", con).set_index("superfamily")
     tabs = {t: pd.read_sql(f"SELECT * FROM {t}", con) for t in DETAIL_TABLES}
     dbest = pd.read_sql("SELECT locus_uid,dfam_accession,consensus_name,pct_identity,"
@@ -413,15 +802,43 @@ def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int,
 
     byuid = {k: {u: d for u, d in v.groupby("locus_uid")} for k, v in tabs.items()}
     dby = {u: d for u, d in dbest.groupby("locus_uid")}
-    # optional table: absent from databases built before the Subramanian load
-    try:
+    # Subramanian 2011 panel. This table was silently lost once when a leaner
+    # catalog rebuild became the `working_data` latest (see CATALOG_MANIFEST):
+    # a bare try/except reported "absent" and the build carried on shipping an
+    # empty identifier group. Presence is now a manifest assertion; only a
+    # genuine query error is tolerated here, and it is re-raised.
+    if _has_table(con, "hml2_provirus_detail"):
         hd = pd.read_sql("SELECT * FROM hml2_provirus_detail "
                          "WHERE locus_uid IS NOT NULL", con)
         hdby = {u: d for u, d in hd.groupby("locus_uid")}
         log(f"  hml2_provirus_detail {len(hd):>4,} rows | {len(hdby)} loci")
-    except Exception:
+    else:
         hdby = {}
-        log("  hml2_provirus_detail  absent -- skipping panel")
+        log("  hml2_provirus_detail  ABSENT (declared optional in manifest)")
+    # ERV Navigator (Missillac) panel. Records are a standalone resource layer,
+    # not loci: the ~120k solo LTRs with no catalog counterpart live in
+    # missillac_record with no mapping row, so they are searchable and linkable
+    # without touching the locus keyspace. Only mapped records reach a panel.
+    # Every overlapping pair is kept; is_primary marks the best Jaccard, and
+    # primary_margin exposes a thin call rather than hiding it.
+    if _has_table(con, "missillac_locus_map") and _has_table(con, "missillac_record"):
+        mn = pd.read_sql("""
+            SELECT m.locus_uid, m.missillac_id, m.rbrt_id, m.category,
+                   m.ovl_bp, m.jaccard, m.is_primary, m.primary_margin,
+                   m.n_loci_for_record, m.strand_agree,
+                   r.lineage_id, r.clade, r.url,
+                   r.chrom_hg19, r.start_hg19, r.end_hg19, r.lift_status,
+                   g.majority_group, g.purity, g.name_match_group,
+                   g.name_match_level, g.name_agrees_with_coords, g.confidence
+            FROM missillac_locus_map m
+            JOIN missillac_record r USING (missillac_id)
+            LEFT JOIN missillac_lineage_group g ON g.lineage_id = r.lineage_id
+            ORDER BY m.locus_uid, m.is_primary DESC, m.jaccard DESC""", con)
+        mnby = {u: d for u, d in mn.groupby("locus_uid")}
+        log(f"  missillac panel      {len(mn):>4,} rows | {len(mnby)} loci")
+    else:
+        mnby = {}
+        log("  missillac_locus_map  ABSENT (declared optional in manifest)")
     alby = {u: d for u, d in al.groupby("locus_uid")}
     rby = repeats_for(con, loc.locus_uid)
     # transcription evidence (optional: needs the TU database and the Snaptron
@@ -435,7 +852,19 @@ def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int,
     # carries the same evidence as one 64-bit word per junction (see
     # pack_junctions for the layout) at ~128 B/locus worst case, and is what the
     # public bundle draws from. Exactly one of the two is populated per build.
-    _pjx = _packed_jx_payload(con, jx_parquet)
+    _pjx = _packed_jx_payload(con, jx_parquet, iv_parquet)
+    # Mappability lane (pm151 Panmask + Umap k100). Summary stats always ship;
+    # the clipped interval blocks need the standalone parquet reference.
+    _mapst, _mapbl = _mappability_payload(con, loc, iv_parquet)
+    # FANTOM5 CAGE lane REMOVED at v0.8 (user decision): the hit rate was too
+    # low to justify the vertical space it occupied in the graphic. The catalog
+    # tables (locus_fantom5) and the parquet are untouched, and _fantom5_payload
+    # is retained below, so restoring the lane is a renderer change plus one
+    # call here -- no recomputation. The --f5-parquet flag is likewise retained.
+    # Per-locus splice-evidence tier (Snaptron srav3h). One short string per
+    # locus, computed at build time from the FULL filtered pair set rather than
+    # the display-capped arc set -- see locus_splice_tier's registry row.
+    _splice = _splice_tier_payload(con)
     # v0.1 transcriptional-unit layer for the LOCUS page's unit panel.
     #
     # These tables live in the TU database, not the catalogue, and the crosswalk is
@@ -487,7 +916,8 @@ def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int,
 
     GKEYS = ("superfamily", "herv_class", "n_loci", "intModel", "repbase_class",
              "hervd_family", "dfam_accession", "dominant_ltr",
-             "frac_with_flanking_ltr", "n_with_hervarium_domain", "extension_verdict")
+             "frac_with_flanking_ltr", "n_with_hervarium_domain", "extension_verdict",
+             "dom_lineage", "dom_frac", "n_lineages")
 
     def recs(d, cols=None, drop=("locus_uid", "resource_key")):
         if d is None:
@@ -540,8 +970,16 @@ def build_shards(con, out: str, loc: pd.DataFrame, al: pd.DataFrame, nb: int,
             # Subramanian 2011 HML-2 detail: age / ORFs / polymorphism. Present for
             # 87 loci only -- the detail view omits the panel when absent.
             "hml2_detail": recs(hdby.get(u)),
+            # ERV Navigator: intactness category, Vargiu-style lineage path and a
+            # direct locus link per Missillac record overlapping this locus.
+            # Multiple rows are expected and meaningful -- our internal-only spans
+            # can sit inside one longer Navigator extent.
+            "missillac": recs(mnby.get(u)),
             "dfam_best": recs(dby.get(u)),
             "repeats": rby.get(u, []),
+            "mappability": {"stats": _mapst.get(u, {}), "blocks": _mapbl.get(u, {})},
+            # "fantom5" removed at v0.8 -- lane dropped for low hit rate.
+            "splice": _splice.get(u, {}),
         }
 
     os.makedirs(f"{out}/data/loci", exist_ok=True)
@@ -742,9 +1180,18 @@ def repeats_for(con, uid_order):
     LOW_INFO behind a toggle. Everything is shipped -- the filter lives in the
     page, so changing your mind costs a page edit, not a rebuild.
     """
-    r = pd.read_sql(
-        "SELECT locus_uid,assembly,chrom,start,end,strand,rep_name,rep_class,"
-        "rep_family,pct_div,n_loci FROM locus_repeat", con)
+    # locus_repeat is OPTIONAL: it is derived from UCSC rmsk rather than from the
+    # crosswalk build, so a catalogue can legitimately predate it. Aborting the
+    # whole bundle over a missing accessory lane is the wrong failure mode -- the
+    # v0.3 build only succeeded because a workspace copy happened to carry the
+    # table, which made the saved catalogue non-reproducing. Warn and skip.
+    try:
+        r = pd.read_sql(
+            "SELECT locus_uid,assembly,chrom,start,end,strand,rep_name,rep_class,"
+            "rep_family,pct_div,n_loci FROM locus_repeat", con)
+    except Exception:
+        log("  repeats              locus_repeat absent -- RepeatMasker lane omitted")
+        return {}
     by = {}
     for t in r.itertuples(index=False):
         by.setdefault(t.locus_uid, []).append({
@@ -932,8 +1379,20 @@ def main(argv=None):
                     help="reused if present, else written after fetch")
     ap.add_argument("--tu-db", default="herv_tu_v0.1.db",
                     help="TU/transcription database; panels are skipped if absent")
-    ap.add_argument("--jx-parquet", default="snaptron_srav3h_jx_sc10.parquet",
-                    help="Snaptron srav3h junctions at samples_count>=10 (hg38)")
+    # The default was "snaptron_srav3h_jx_sc10.parquet" -- a filename that has
+    # never existed. Every build that did not pass --jx-parquet explicitly
+    # therefore resolved it to nothing, logged one tolerant line, and shipped a
+    # bundle with no arcs. v0.7 did exactly that. The default now names the file
+    # that is actually on disk, and OPTIONAL_INPUTS below makes a miss loud.
+    ap.add_argument("--jx-parquet", default="snaptron_srav3h_herv_junctions.parquet",
+                    help="Snaptron srav3h canonical HERV junctions (hg38); "
+                         "supplies the packed-arc layer")
+    ap.add_argument("--f5-parquet", default="fantom5_peaks_herv.parquet",
+                    help="FANTOM5 CAGE dominant-TSS positions for HERV windows")
+    ap.add_argument("--iv-parquet", default="mappability_intervals.parquet",
+                    help="standalone merged mappability interval reference; supplies "
+                         "the drawn blocks for the mappability lane (stats come "
+                         "from the catalogue and ship without it)")
     ap.add_argument("--debug-local", action="store_true",
                     help="also write the per-TU shard set and TU detail route "
                          "(stage 5). Roughly doubles bundle size -- intended for "
@@ -942,6 +1401,14 @@ def main(argv=None):
     ap.add_argument("--skip-shards", action="store_true")
     ap.add_argument("--skip-genes", action="store_true")
     ap.add_argument("--validate-only", action="store_true")
+    ap.add_argument("--allow-incomplete", action="store_true",
+                    help="downgrade CATALOG_MANIFEST shortfalls from fatal to "
+                         "warnings (for deliberate builds from a leaner "
+                         "catalog). The bundle is stamped incomplete.")
+    ap.add_argument("--allow-missing-layers", action="store_true",
+                    help="downgrade missing evidence-layer input files "
+                         "(OPTIONAL_INPUTS) from fatal to warnings, for a "
+                         "deliberately lean bundle. Stamped in metadata.")
     a = ap.parse_args(argv)
 
     if not os.path.exists(a.db):
@@ -952,6 +1419,14 @@ def main(argv=None):
     if a.validate_only:
         log("[validate]")
         return 0 if validate(a.out, debug=a.debug_local) else 1
+
+    log("[0/4] catalog manifest")
+    manifest_report = check_catalog(con, allow_incomplete=a.allow_incomplete)
+    # File-level twin of the catalog manifest. Skipped when the stages that
+    # consume these files are not running, so --skip-shards stays usable.
+    input_report = ({"inputs": [], "complete": None, "skipped": "no shard stage"}
+                    if a.skip_shards else
+                    check_inputs(a, allow_missing=a.allow_missing_layers))
 
     t0 = time.time()
     loc = al = None
@@ -966,7 +1441,8 @@ def main(argv=None):
             al = pd.read_sql("SELECT locus_uid,alias,alias_type,assignment,is_current "
                              "FROM locus_alias", con)
         build_shards(con, a.out, loc, al, a.buckets, a.tu_db, a.jx_parquet,
-                     debug=a.debug_local)
+                     debug=a.debug_local, iv_parquet=a.iv_parquet,
+                     f5_parquet=a.f5_parquet)
     if a.debug_local:
         log("[5/5] TU shards (--debug-local)")
         build_tu_shards(con, a.out, a.tu_db, a.jx_parquet, a.buckets)
@@ -974,6 +1450,10 @@ def main(argv=None):
         log(f"[3/4] gene models ({a.gencode})")
         build_gene_models(con, a.out, a.gencode, a.gene_cache, a.gene_parquet,
                           a.hs1_gtf, a.hs1_parquet)
+    # Provenance: record what the catalog contained at build time, so an
+    # incomplete bundle is identifiable without re-deriving it from the data.
+    dump_json({**manifest_report, "input_manifest": input_report},
+              f"{a.out}/data/catalog_manifest.json")
     log("[4/4] validate")
     good = validate(a.out, debug=a.debug_local)
     log(f"\n{'OK' if good else 'FAILED'} in {time.time()-t0:.0f}s -> {a.out}/")

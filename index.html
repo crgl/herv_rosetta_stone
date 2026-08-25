@@ -5,7 +5,8 @@
 <title>HERV catalog browser</title>
 <style>
  :root{--ink:#1b1b1f;--mut:#6b6b76;--line:#dcdce3;--bg:#fbfbfd;--pan:#fff;
-       --ltr:#3b6ea5;--int:#a5553b;--orf:#4a7c59;--dom:#8c6d3f;--gene:#7a5c8f;--acc:#2b5f8a}
+       --ltr:#3b6ea5;--int:#a5553b;--orf:#4a7c59;--dom:#8c6d3f;--gene:#7a5c8f;--acc:#2b5f8a;
+      --map1:#2f7d4f;--map2:#4a6fa5;--cage1:#c2410c;--cage2:#7c6ba0}
  *{box-sizing:border-box}
  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
       color:var(--ink);background:var(--bg)}
@@ -105,10 +106,12 @@
 const MAXSHOW=20, IDENT_LABEL={combined_id:"combined_id (positional)",versioned_id:"versioned_id (with version)",
   telescope_id:"telescope_id",hervd_id:"HERVd ID",ervmap_id:"ERVmap ID",ervmap_alt_name:"ERVmap alt name",
   subramanian_id:"Subramanian 2011 locus (HML-2)",hml2_k_number:"HML-2 K-number (Subramanian)",
-  hml2_k_designation:"HML-2 K-designation (Subramanian)",hgnc_ervk_symbol:"HGNC ERVK symbol"};
+  hml2_k_designation:"HML-2 K-designation (Subramanian)",hgnc_ervk_symbol:"HGNC ERVK symbol",
+  missillac_id:"Missillac ID (ERV Navigator)",rbrt_id:"RBRT ID (ERV Navigator legacy)"};
+const NAV_URL="https://ervnavigator.fredhutch.org/locus/";
 const CLASS_LABEL={dfam_int_model:"Dfam internal model",dfam_accession:"Dfam accession",repbase_name:"RepBase name"};
 let IDX=null, NB=400, shardCache=new Map(), curSel=-1, curList=[];
-let FZ=null, LM=null, KPOS=null, CPOS=null, listState=null;
+let FZ=null, LM=null, KPOS=null, CPOS=null, MPOS=null, listState=null;
 // TU layer: present only in a --debug-local bundle. TUMETA stays null in the
 // public build and every TU code path checks it, so one front-end serves both.
 let TUMETA=null, TUIDS=null, TUIDX=null, tuShardCache=new Map();
@@ -246,6 +249,44 @@ function fuzzySearch(q,only,cap){
   return out;
 }
 
+/* ERV Navigator records that resolve to NO catalog locus (~120k solo LTRs).
+   These are real annotations deliberately not promoted to loci, so they have no
+   uid and cannot ride the fuzzy postings above. Searched as a separate lane and
+   rendered as outbound-only rows: a valid Missillac ID must never come back
+   empty, but it must also not masquerade as a locus we annotate. */
+function missillacSearch(q,only,cap){
+  const MI=IDX.missillac;
+  if(!MI||!MI.keys||!MI.keys.length)return [];
+  if(only!=null&&only!=="missillac_id"&&only!=="rbrt_id")return [];
+  const n=nrm(q); if(!n)return [];
+  const out=[], seen=new Set();
+  const push=(tier,ki)=>{
+    for(const ri of MI.post[ki]){
+      if(seen.has(ri))continue;
+      seen.add(ri);
+      const r=MI.rows[ri];
+      // r = [missillac_id, rbrt_id, cat_ix, lineage_id, chrom, start, end, url]
+      const matched=(nrm(r[0])===n||nrm(r[0]).startsWith(n))?r[0]:r[1];
+      if(only==="missillac_id"&&matched!==r[0])continue;
+      if(only==="rbrt_id"&&matched!==r[1])continue;
+      out.push({tier,unmapped:true,missillac_id:r[0],rbrt_id:r[1],
+                cat:MI.cats[r[2]]||null,lineage_id:r[3],
+                chrom:r[4],start:r[5],end:r[6],url:r[7],
+                str:matched,type:matched===r[0]?"missillac_id":"rbrt_id"});
+    }};
+  // MPOS mirrors KPOS/CPOS: a linear indexOf over ~130k keys would run on every
+  // keystroke, which is exactly what those maps exist to avoid.
+  if(MPOS===null){MPOS=new Map();MI.keys.forEach((k,i)=>MPOS.set(k,i));}
+  const exv=MPOS.get(n), ex=(exv===undefined?-1:exv);
+  if(ex>=0)push(nrm(q)===String(q).toUpperCase()?TIER.EXACT:TIER.NORM,ex);
+  for(let i=lb(MI.keys,n);i<MI.keys.length&&out.length<cap;i++){
+    if(!MI.keys[i].startsWith(n))break;
+    if(i!==ex)push(TIER.PREFIX,i);
+  }
+  out.sort((a,b)=>a.tier-b.tier||a.str.length-b.str.length||a.str.localeCompare(b.str));
+  return out;
+}
+
 function onType(){
   const sel=$("kspace").value,[kind,type]=sel.split(":"),raw=$("q").value.trim(),qs=raw.toUpperCase();
 
@@ -329,6 +370,13 @@ function onType(){
   }
   const rows=[...byU.values()].sort((a,b)=>a.tier-b.tier||a.k.length-b.k.length)
                               .slice(0,MAXSHOW*3);
+  /* ERV Navigator records with no catalog locus, appended AFTER the locus hits.
+     Ranked below every locus row on purpose: they are outbound references, not
+     loci we annotate, so they must never outrank a real hit. */
+  const mrows=missillacSearch(raw,only,MAXSHOW).map(h=>({
+    k:h.str,uids:[],cur:1,kind:"m",type:h.type,types:[h.type],tier:h.tier,alts:[],
+    nav:h}));
+  rows.push(...mrows.slice(0,MAXSHOW));
   show(rows);
   const nLoci=new Set(hits.map(h=>h.uid)).size;
   const nT=rows.filter(h=>h.tier>=TIER.COLLAPSE).length;
@@ -359,16 +407,26 @@ function show(hits){
     if(h.kind==="u")badges.push('<span class="badge">internal key</span>');
     if(h.kind==="t")badges.push('<span class="badge">unit · '+h.nmem+
       (h.nmem===1?" locus":" loci")+"</span>");
+    // Unmapped ERV Navigator record: says so plainly. The category is the useful
+    // fact (almost all are solo LTRs, which this catalog does not annotate as loci).
+    if(h.kind==="m")badges.push('<span class="badge collapse" title="ERV Navigator '+
+      'record with no overlapping locus in this catalog — opens on ervnavigator.fredhutch.org">'+
+      esc(h.nav.cat||"Navigator")+" · no catalog locus</span>");
     // what the matched string resolves to, plus which scheme it came from
     const sec=(h.kind==="i"||h.kind==="u")&&n===1?(IDX.uid2cid[h.uids[0]]||""):"";
     // name EVERY scheme the string belongs to, not just the first indexed one
     const tl=(h.types&&h.types.length?h.types:(h.type?[h.type]:[]));
-    const ty=h.kind==="i"&&tl.length
+    const ty=(h.kind==="i"||h.kind==="m")&&tl.length
       ?'<span class="tsrc">'+tl.map(t=>esc(IDENT_LABEL[t]||t)).join(" · ")+"</span>":"";
+    // For an unmapped record the lineage + hg38 position is all we can offer in
+    // place of a combined_id, and it is what tells the user where it sits.
+    const navsec=h.kind==="m"
+      ?' <em>'+esc(h.nav.lineage_id||"")+(h.nav.chrom?" · "+esc(h.nav.chrom)+":"+
+        (h.nav.start==null?"?":Number(h.nav.start).toLocaleString()):"")+"</em>":"";
     const alts=(h.alts&&h.alts.length)
       ? '<div class="alts">also '+h.alts.map(a=>"<b>"+esc(a.s)+"</b> <em>"+
           esc(IDENT_LABEL[a.t]||a.t)+"</em>").join(", ")+"</div>" : "";
-    return '<div class="ri" data-i="'+i+'"><span><b>'+esc(h.k)+"</b> "+ty+
+    return '<div class="ri" data-i="'+i+'"><span><b>'+esc(h.k)+"</b> "+ty+navsec+
       (sec&&sec!==h.k?' <em>→ '+esc(sec)+"</em>":"")+alts+"</span><span>"+badges.join(" ")+"</span></div>";
   }).join("");
   R.classList.add("on");
@@ -394,6 +452,10 @@ function showError(where,e){
 async function pick(i){
   try{
     const h=curList[i]; hide(); $("q").value=h.k;
+    // Unmapped ERV Navigator record: there is no shard to fetch, so render a
+    // stub that states plainly what it is and links out. Silently doing nothing
+    // (or throwing a "absent from shard" error) would read as a broken index.
+    if(h.kind==="m")return renderMissillacStub(h.nav);
     if(h.kind==="t"){
       const t=await getTU(h.tu);
       if(!t) throw new Error("unit "+h.tu+" absent from TU shard "+(djb2(h.tu)%NB));
@@ -409,6 +471,35 @@ async function pick(i){
     renderList(h);
   }catch(e){ showError("Loading locus",e); }
 }
+/* Stub view for an ERV Navigator record with no catalog counterpart.
+
+   Deliberately spare: we hold no evidence layers for these, and dressing the page
+   up with empty panels would imply we do. It states the record's own facts, says
+   why there is no locus page, and links out. The hg38 coordinates are OUR lift of
+   the published hg19 span, and are labelled as such — presenting them unqualified
+   would attribute a coordinate to ERV Navigator that it never published. */
+function renderMissillacStub(r){
+  const url=r.url||(NAV_URL+encodeURIComponent(r.missillac_id));
+  const pos=r.chrom?esc(r.chrom)+":"+Number(r.start).toLocaleString()+"-"+
+                    Number(r.end).toLocaleString():null;
+  $("view").innerHTML='<div class="panel"><h2>'+esc(r.missillac_id)+
+    ' <span class="badge collapse">no catalog locus</span></h2>'+
+    '<dl class="kv">'+
+      kvx("Missillac ID",r.missillac_id)+kvx("RBRT ID (legacy)",r.rbrt_id)+
+      kvx("category",r.cat)+kvx("lineage",r.lineage_id)+
+      kvx("hg38 (lifted here)",pos)+
+    '</dl>'+
+    '<div class="note">This ERV Navigator record does not overlap any locus in this '+
+    'catalog. Almost all such records are solo LTRs, which this catalog does not '+
+    'annotate as loci — its spans are internal-element extents. The record is '+
+    'indexed here so the identifier resolves; the authoritative page is on ERV '+
+    'Navigator.</div>'+
+    '<div class="note">hg38 coordinates shown are this project\u2019s liftOver of the '+
+    'published hg19 span, not an ERV Navigator coordinate.</div>'+
+    '<p><a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">Open on ERV Navigator \u2197</a></p>'+
+    '</div>';
+}
+function kvx(k,v){return v==null||v===""?"":"<dt>"+esc(k)+"</dt><dd>"+esc(String(v))+"</dd>";}
 async function getTU(tid){
   const b=djb2(tid)%NB;
   if(!tuShardCache.has(b)){

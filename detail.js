@@ -75,6 +75,7 @@ function render(d,h){
        kv("LTR names",st.ltr_names)+kv("internal names",st.int_names)+
        kv("tandem/nested",st.is_tandem_or_nested?"yes":"no")+
        kv("segments",d.segments.length+(d.segments.length?"":" (none stored)"))+
+       spliceKv(d)+
      '</dl></div>'+
      '<div class="panel"><h2>Group — '+esc(d.group)+'</h2><dl class="kv">'+
        kv("superfamily",g.superfamily)+kv("HERV class",g.herv_class)+
@@ -83,6 +84,11 @@ function render(d,h){
        kv("dominant LTR",g.dominant_ltr)+
        kv("with flanking LTR",g.frac_with_flanking_ltr==null?null:(100*g.frac_with_flanking_ltr).toFixed(1)+"%")+
        kv("extension verdict",g.extension_verdict)+
+       // Lineage is many-to-many with group, so it gets two rows, never one:
+       // the viewed locus's own Navigator lineage(s) -- exact -- and the
+       // group's dominant lineage carried WITH its share, so a reader can see
+       // when "dominant" means 85% and when it means 38%.
+       lineageKv(d,g)+
      '</dl></div></div>'+
    tuPanel(d)+
    // transcription evidence sits next to the TU panel: both describe what is
@@ -107,10 +113,13 @@ function render(d,h){
      '<span><i style="background:#2e8b8b"></i>SINE/Alu</span>'+
      '<span><i style="background:#3b6ea5"></i>LTR (RepeatMasker)</span>'+
      '<span><i style="background:#6b7f3a"></i>DNA</span>'+
-     '<span><i style="background:var(--gene)"></i>gene exon (thick) / intron (thin)</span></div></div>'+
+     '<span><i style="background:var(--gene)"></i>gene exon (thick) / intron (thin)</span>'+
+
+     '</div></div>'+
    '<div class="panel"><h2>Coordinates</h2>'+coordTable(d,xg)+'</div>'+
    '<div class="panel"><h2>Aliases — '+d.aliases.length+' rows</h2>'+aliasTable(d.aliases)+'</div>'+
    hml2Panel(d.hml2_detail)+
+   missillacPanel(d.missillac)+
    '<div class="panel"><h2>Dfam best alignment</h2>'+
      (dfb.consensus_name?'<dl class="kv">'+kv("consensus",dfb.consensus_name)+kv("accession",dfb.dfam_accession)+
        kv("% identity",dfb.pct_identity==null?null:Number(dfb.pct_identity).toFixed(1))+
@@ -129,6 +138,71 @@ function render(d,h){
   const rc=$("repall"); if(rc) rc.onchange=()=>{ if(gco) drawLocus(d,gco,gasm); };
 }
 function kv(k,v){return "<dt>"+esc(k)+"</dt><dd>"+fmt(v)+"</dd>";}
+
+// Snaptron splice-evidence summary. A strict ladder: the FIRST tier that
+// applies is reported, so "donor or acceptor internal (sense)" implies no
+// single sense junction had both ends inside, and an antisense tier implies no
+// sense junction qualified at all.
+//
+// Two things this line deliberately does NOT do:
+//  - it does not collapse "no evidence" into "not assessable". srav3h is
+//    hg38-only and does not cover every alt contig, so 3,710 loci cannot be
+//    assessed at all; reporting those as negative would be a false statement.
+//  - it does not derive the tier from the drawn arcs. Arcs are capped per
+//    locus for bundle size, and the cap changes the tier on 405 loci, so the
+//    line reports the full filtered evidence and says so when they can differ.
+const SPLICE_TIER = {
+  both_sense:  "donor and acceptor internal (sense)",
+  one_sense:   "donor or acceptor internal (sense)",
+  both_anti:   "donor and acceptor internal (antisense)",
+  one_anti:    "donor or acceptor internal (antisense)",
+  intronic:    "intronic \u2014 spanning junction"
+};
+const SPLICE_DETAIL = {
+  donor:    "donor internal",
+  acceptor: "acceptor internal",
+  both:     "both, on separate splice junctions"
+};
+function spliceKv(d){
+  const s=d.splice||{}, t=s.t;
+  if(!t) return kv("splicing (Snaptron)",null);
+  if(t==="not_assessable")
+    return "<dt>splicing (Snaptron)</dt><dd><span class=\"note\">not assessable"+
+           (s.d?" \u2014 "+esc(s.d):"")+"</span></dd>";
+  if(t==="none")
+    return "<dt>splicing (Snaptron)</dt><dd>no qualifying junction"+
+           "<span class=\"note\"> (assessable; canonical, \u226510 samples)</span></dd>";
+  let txt=SPLICE_TIER[t]||t;
+  // The "specify which end" detail the ladder asks for, on the single-end tiers.
+  if((t==="one_sense"||t==="one_anti") && s.d) txt+=" \u2014 "+(SPLICE_DETAIL[s.d]||s.d);
+  // For the spanning tier the strand is what needs specifying, not the end.
+  if(t==="intronic" && s.d) txt+=" ("+(s.d==="both"?"sense and antisense":esc(s.d))+")";
+  return "<dt>splicing (Snaptron)</dt><dd>"+esc(txt)+
+    (s.sc!=null?'<span class="note"> \u00b7 max '+(+s.sc).toLocaleString()+" samples</span>":"")+
+    '<span class="note" title="Ladder: both-sense &gt; one-sense &gt; both-antisense &gt; '+
+    'one-antisense &gt; intronic. Donor = the junction\u2019s 5\u2032 end. Computed from all '+
+    'canonical junctions with \u226510 samples, not only the arcs drawn below \u2014 the '+
+    'arc set is capped per locus.">\u00a0\u24d8</span></dd>';
+}
+
+function lineageKv(d,g){
+  // This locus's own lineage(s), from the Navigator records overlapping it.
+  const rows=(d.missillac||[]);
+  const mine=[...new Set(rows.map(r=>r.lineage_id).filter(Boolean))];
+  let out = mine.length
+    ? "<dt>lineage (this locus)</dt><dd>"+mine.map(esc).join(", ")+
+      (mine.length>1?'<span class="note"> \u00b7 '+mine.length+" Navigator records disagree</span>":"")+"</dd>"
+    : kv("lineage (this locus)",null);
+  if(g.dom_lineage){
+    const pct=g.dom_frac==null?null:(100*g.dom_frac).toFixed(0);
+    const weak=g.dom_frac!=null&&g.dom_frac<0.5;
+    out += "<dt>group lineage</dt><dd>"+esc(g.dom_lineage)+
+      '<span class="note'+(weak?" warn":"")+'"> \u00b7 '+
+      (pct!=null?pct+"% of group loci":"dominant")+
+      (g.n_lineages?", of "+g.n_lineages+" lineages in group":"")+"</span></dd>";
+  }
+  return out;
+}
 function tbl(rows,cols){
   if(!rows||!rows.length)return '<div class="note">none</div>';
   const use=cols.filter(c=>rows.some(r=>r[c]!=null&&r[c]!==""));
@@ -139,6 +213,68 @@ function tbl(rows,cols){
    the panel is omitted entirely rather than rendered empty. Coordinates shown are
    the paper's own hg19 -- the hg38/T2T equivalents are already in the Coordinates
    panel, and repeating them here would imply the paper published them. */
+/* ERV Navigator (Missillac) panel.
+
+   Several rows on one locus is normal, not an error: our spans are internal-element
+   extents, so one longer Navigator element can contain two of our loci and one of
+   our loci can be hit by an element plus its flanking LTR records. The primary row
+   is the best Jaccard; `margin` exposes how thin that call was, because a 0.001
+   margin between two candidates is a coin-flip dressed as a decision.
+
+   The lineage reconciliation is shown per row with its purity, and a name/coordinate
+   DISAGREEMENT is called out explicitly. Navigator names its lineages after the LTR
+   family; this catalog groups by internal element, so e.g. lineage ERVR-1.Theta.MER21
+   sits on loci we group as MER4B and none of them carry a MER21* RepBase name. That
+   is a real vocabulary difference, not a mapping error, and hiding it would let a
+   user read "MER21" as our MER21. */
+function missillacPanel(rows){
+  if(!rows||!rows.length)return "";
+  const pri=rows.find(r=>r.is_primary)||rows[0];
+  const navlink=r=>{
+    const u=r.url||("https://ervnavigator.fredhutch.org/locus/"+encodeURIComponent(r.missillac_id));
+    return '<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(r.missillac_id)+" \u2197</a>";
+  };
+  const disagree=pri.name_agrees_with_coords===0&&pri.name_match_level!=="numeric_expansion";
+  const head='<dl class="kv">'+
+    kv("category",pri.category)+
+    kv("lineage",pri.lineage_id)+
+    kv("clade",pri.clade)+
+    kv("our group (by overlap)",pri.majority_group==null?null:
+        pri.majority_group+" ("+(100*Number(pri.purity)).toFixed(0)+"% of "+
+        (pri.confidence||"?")+"-confidence lineage hits)")+
+    kv("lineage name matches",pri.name_match_group==null?"no name match":
+        pri.name_match_group+" ("+(pri.name_match_level||"").replace(/_/g," ")+")")+
+    kv("records on this locus",rows.length)+
+    '</dl>';
+  const warn=disagree
+    ? '<div class="note" style="border-left:3px solid #a33;padding-left:8px">'+
+      'Vocabulary conflict: the lineage name resolves to <b>'+esc(pri.name_match_group)+
+      '</b> but the loci this lineage overlaps are grouped <b>'+esc(pri.majority_group)+
+      '</b>. ERV Navigator names lineages after the LTR family; this catalog groups by '+
+      'internal element. Treat the two names as different vocabularies, not synonyms.</div>'
+    : "";
+  const body=rows.map(r=>{
+    const b=[];
+    if(r.is_primary)b.push('<span class="badge">primary</span>');
+    if(r.is_primary&&r.primary_margin!=null&&Number(r.primary_margin)<0.05)
+      b.push('<span class="badge ambig" title="best and runner-up Jaccard differ by '+
+        Number(r.primary_margin).toFixed(3)+' — a thin call">thin margin</span>');
+    if(r.n_loci_for_record>1)b.push('<span class="badge ambig">'+r.n_loci_for_record+" loci</span>");
+    if(r.strand_agree===0)b.push('<span class="badge collapse">strand differs</span>');
+    if(r.lift_status&&r.lift_status!=="both")b.push('<span class="badge collapse">'+esc(r.lift_status)+"</span>");
+    return "<tr><td>"+navlink(r)+"</td><td class=\"mono\">"+esc(r.rbrt_id||"")+"</td>"+
+      "<td>"+esc(r.category||"")+"</td><td>"+esc(r.lineage_id||"")+"</td>"+
+      '<td class="mono">'+(r.jaccard==null?"":Number(r.jaccard).toFixed(3))+"</td>"+
+      '<td class="mono">'+(r.ovl_bp==null?"":Number(r.ovl_bp).toLocaleString())+"</td>"+
+      "<td>"+b.join(" ")+"</td></tr>";
+  }).join("");
+  return '<div class="panel"><h2>ERV Navigator \u2014 '+rows.length+
+    (rows.length===1?" record":" records")+"</h2>"+head+warn+
+    "<table><tr><th>Missillac ID</th><th>RBRT</th><th>category</th><th>lineage</th>"+
+    "<th>Jaccard</th><th>overlap bp</th><th></th></tr>"+body+"</table>"+
+    '<div class="note">Jaccard and overlap are against this locus\u2019 hg38 span. '+
+    'ERV Navigator coordinates were published on hg19 and lifted here.</div></div>';
+}
 function hml2Panel(rows){
   if(!rows||!rows.length)return "";
   return rows.map(r=>'<div class="panel"><h2>HML-2 provirus detail — '+
@@ -239,6 +375,54 @@ async function drawLocus_(d,co,asm){
         return rect(a,0,Math.max(1.5,b-a),12,repCol(r.rep_class))+
                lbl((a+b)/2,8.7,txt,"#fff",7,"middle",ok);
       }).join("");}});
+  // Mappability lanes. Two resources on hg38 (pm151 Panmask "easy" at 151bp, and
+  // Umap k100 single-read uniqueness); on t2t only Umap, because Panmask has no
+  // T2T release -- the lane is omitted there rather than drawn empty, which would
+  // read as "unmappable" when it means "no such resource".
+  //
+  // Blocks are shipped pre-clipped to locus +/-1000, the same window drawn here.
+  // Both interval sets mark GOOD regions, so a GAP is the unmappable state; the
+  // lane draws a faint full-width track under the blocks to make gaps legible as
+  // absence rather than as background.
+  const MAPRS=[["pm151","pm151 easy (151b)","var(--map1,#2f7d4f)"],
+               ["umap100","Umap unique (k100)","var(--map2,#4a6fa5)"]];
+  const mp=d.mappability||{};
+  MAPRS.forEach(([rs,lab,col])=>{
+    const key=rs+"_"+asm, st=(mp.stats||{})[key], bl=(mp.blocks||{})[key];
+    if(!st) return;                       // resource not present for this assembly
+    if(st.no_data){
+      lanes.push({label:lab,h:12,draw:()=>rect(x(w0),3,x(w1)-x(w0),7,"#f0eef2")+
+        lbl((x(w0)+x(w1))/2,9,"no data \u2014 contig not covered by this resource",
+            "#8a7f95",7,"middle",true)});
+      return;
+    }
+    const segs2=(bl||[]).filter(b=>b[1]>w0&&b[0]<w1);
+    const pct=st.frac==null?"":" \u2014 "+(100*st.frac).toFixed(0)+"% of locus";
+    lanes.push({label:lab,h:12,draw:()=>{
+      let s=rect(x(w0),4,x(w1)-x(w0),5,"#eceaef");   // gaps show through as this
+      for(const b of segs2){
+        const a=x(b[0]),e2=x(b[1]);
+        s+=rect(a,3,Math.max(0.8,e2-a),7,col);
+      }
+      // element extent markers, so a reader can tell locus-internal gaps from
+      // flanking ones without cross-referencing another lane
+      s+=line(x(co.start),1,x(co.start),11,"#333",0.6)+
+         line(x(co.end),1,x(co.end),11,"#333",0.6);
+      s+='<title>'+esc(lab)+pct+
+         (st.longest_unmap!=null?"; longest unmappable run "+st.longest_unmap.toLocaleString()+" bp":"")+
+         (st.blocks!=null?"; "+st.blocks+" block(s) overlapping locus":"")+
+         (st.t5!=null?"; 5\u2032 50bp "+(st.t5?"mappable":"NOT mappable"):"")+
+         (st.t3!=null?"; 3\u2032 50bp "+(st.t3?"mappable":"NOT mappable"):"")+
+         '</title>';
+      return s;}});
+  });
+  // FANTOM5 CAGE lane REMOVED at v0.8. The layer's hit rate was too low to
+  // justify the vertical space: it drew on a small minority of loci while
+  // costing 22px of graphic height on every one. It was also never
+  // independent evidence -- FANTOM CAT clusters derive from the same primary
+  // CAGE data, so the two lanes agreeing was one observation, not two.
+  // The builder retains _fantom5_payload and --f5-parquet, and locus_fantom5
+  // is untouched in the catalog, so restoring this lane needs no recomputation.
   const orfs=isHg?(d.geve||[]).filter(o=>o.hg38_orf_end>w0&&o.hg38_orf_start<w1):[];
   if(orfs.length)lanes.push({label:"gEVE ORFs",h:15,draw:()=>orfs.map(o=>{
       const a=x(o.hg38_orf_start),b=x(o.hg38_orf_end),txt=o.orf_class||"ORF";
