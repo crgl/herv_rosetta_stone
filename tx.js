@@ -111,11 +111,18 @@ function jxPanel(d){
    Decodes the bit-packed arcs the non-debug bundle ships (see pack_junctions.py
    for the authoritative layout):
 
-     bits 63..41 (23)  donor offset, signed, relative to the locus 5' end
-     bit  40     ( 1)  1 = junction strand differs from the locus strand
-     bits 39..16 (24)  acceptor offset, signed, same origin
+     bits 63..42 (22)  donor offset, signed, relative to the locus 5' end
+     bit  41     ( 1)  1 = junction strand differs from the locus strand
+     bits 40..19 (22)  acceptor offset, signed, same origin
+     bit  18     ( 1)  1 = an outer anchor window is pm151-easy
+     bits 17..16 ( 2)  spare
      bits 15..8  ( 8)  sample count,    10^(code/32)
      bits  7..0  ( 8)  coverage/sample, 10^(code/32)
+
+   (This block previously read 23/1/24 with the strand at bit 40 and no anchor
+   bit -- it did not match pack_junctions.py and did not match the decoder ten
+   lines below it. The decoder was correct; only the prose was wrong. Donor
+   here is the junction's 5' end, assigned from the junction's own strand.)
 
    The words arrive as decimal strings in JSON, not numbers: a 64-bit value
    exceeds Number.MAX_SAFE_INTEGER (2^53), so parsing one as a double silently
@@ -139,14 +146,20 @@ function pjxDecode(pjx, co){
   if(!pjx || !pjx.w || !pjx.w.length) return {jx:[], n_total:0, shown:0};
   const five = co.strand === "+" ? co.start : co.end;
   const sgn  = co.strand === "+" ? 1 : -1;
-  const M24 = (1n<<24n)-1n, M23 = (1n<<23n)-1n;
+  // Layout (see pack_junctions.py): 22 donor | 1 strand | 22 acceptor |
+  // 1 anchor-mappable | 2 spare | 8 sc | 8 cov.  Both offsets are 22 bits, so
+  // one mask and one sign-extension threshold serve both.
+  const M22 = (1n<<22n)-1n;
   const jx = pjx.w.map(raw=>{
     const w = BigInt(raw);
-    let d = (w>>41n) & M23;
-    let a = (w>>16n) & M24;
-    if(d >= 1n<<22n) d -= 1n<<23n;   // sign-extend 23-bit
-    if(a >= 1n<<23n) a -= 1n<<24n;   // sign-extend 24-bit
-    const anti = Number((w>>40n) & 1n);
+    let d = (w>>42n) & M22;
+    let a = (w>>19n) & M22;
+    if(d >= 1n<<21n) d -= 1n<<22n;   // sign-extend 22-bit
+    if(a >= 1n<<21n) a -= 1n<<22n;   // sign-extend 22-bit
+    const anti = Number((w>>41n) & 1n);
+    // 1 = at least one outer 50bp anchor window is wholly inside a pm151 easy
+    // region, i.e. a split read can actually be placed at this junction.
+    const anch = Number((w>>18n) & 1n);
     const sc  = Math.round(Math.pow(10, Number((w>>8n) & 0xFFn)/PJX_LOG));
     const cov = Math.pow(10, Number(w & 0xFFn)/PJX_LOG);
     // undo the 5'-relative, strand-signed encoding
@@ -155,7 +168,7 @@ function pjxDecode(pjx, co){
     const cls = (lo < co.start && hi > co.end) ? "span"
               : (lo >= co.start && hi <= co.end) ? "both" : "edge";
     const st = anti ? (co.strand === "+" ? "-" : "+") : co.strand;
-    return [lo, hi, sc, st, 1, cls, cov, anti];
+    return [lo, hi, sc, st, 1, cls, cov, anti, anch];
   });
   return {jx:jx, n_total: pjx.n||jx.length, shown: jx.length, packed:true};
 }
@@ -177,8 +190,16 @@ function arcLane(arcs,x,w0,w1,H){
     // everything but the deepest junction invisible.
     const op=0.25+0.65*(Math.log10(j[2])/Math.log10(Math.max(mx,11)));
     const h=Math.min(H-2,6+H*0.55*Math.min(1,(b-a)/400));
+    // Anchor mappability (packed source only, index 8) rides stroke WIDTH, the
+    // one channel still free: colour already carries class, dash carries
+    // antisense, opacity carries support. A hairline arc means neither of the
+    // junction's outer 50bp anchors sits in a pm151 easy region, so the junction
+    // may be an artefact of unplaceable reads rather than real splicing. The flag
+    // is only meaningful when it was actually measured, hence the length check.
+    const measured=j.length>8, unanch=measured&&!j[8];
+    const wdt=unanch?0.5:(cls==="cross"?1.6:1);
     return '<path d="M'+a+" "+H+" Q"+((a+b)/2)+" "+(H-h*2)+" "+b+" "+H+
-      '" fill="none" stroke="'+col+'" stroke-width="'+(cls==="cross"?1.6:1)+
+      '" fill="none" stroke="'+col+'" stroke-width="'+wdt+
       (anti?'" stroke-dasharray="3,2':"")+
       '" opacity="'+op.toFixed(2)+'"><title>'+esc(cls)+" junction "+
       j[0].toLocaleString()+"–"+j[1].toLocaleString()+"  ("+
@@ -191,6 +212,8 @@ function arcLane(arcs,x,w0,w1,H){
       (j[4]?", canonical motif":", non-canonical")+
       (j.length>6&&j[6]?", "+(arcs&&arcs.packed?"~":"")+j[6].toFixed(1)+" reads/sample":"")+
       (arcs&&arcs.packed?"  \u2014 log-quantised, \u00b14%":"")+
+      (measured?(unanch?"; NEITHER 50bp anchor mappable (pm151)"
+                      :"; \u22651 50bp anchor mappable (pm151)"):"")+
       ")</title></path>";
   }).join("");
 }
