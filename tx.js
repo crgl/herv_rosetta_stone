@@ -25,22 +25,22 @@
    colours and counted separately, and a unit where neither class exists says so
    ("unanchored") rather than showing a blank panel. */
 
-const TX_LEVEL_COL={stringent:"#1a6b3a",robust:"#2e8b57",permissive:"#8fbf9f"};
+const TX_LEVEL_COL={stringent:"var(--tss3)",robust:"var(--tss2)",permissive:"var(--tss1)"};
 const TX_LEVEL_RANK={permissive:1,robust:2,stringent:3};
-const JX_CROSS="#c2452d", JX_WITHIN="#3b6ea5", JX_ANY="#5a6b7a", JX_UNANCH="#9a8fa8";
+const JX_CROSS="var(--jx-cross)", JX_WITHIN="var(--jx-within)", JX_ANY="var(--jx-any)", JX_UNANCH="var(--jx-anti)";
 /* packed-reference classes on the LOCUS page: `span` = the element sits entirely
    within this intron, `edge` = one end inside the element, `both` reuses the
    within-element blue since it means the same thing at locus scale. */
-const JX_SPAN="#8a8f98", JX_EDGE="#2e7d5b";
+const JX_SPAN="var(--jx-span)", JX_EDGE="var(--jx-edge)";
 
 /* One evidence cell: a coloured chip at the strictest supported tier, a dash when
    the element was never assessable, the word "none" when it was assessed clean. */
 function txChip(level,assessable,anti){
-  if(!assessable) return '<span class="txna" title="no FANTOM5 coverage over this '+
+  if(!assessable) return '<span class="txna" title="no FANTOM CAT coverage over this '+
     'element — absence of evidence cannot be distinguished from absence of signal">'+
     "not assessable</span>";
   if(!level) return '<span class="txnone" title="assessed and no evidence found">none</span>';
-  const c=TX_LEVEL_COL[level]||"#666";
+  const c=TX_LEVEL_COL[level]||"var(--mut)";
   return '<span class="txchip" style="background:'+c+'">'+esc(level)+"</span>"+
     (anti?' <span class="txanti" title="evidence on the strand opposite the element">'+
       "antisense</span>":"");
@@ -62,29 +62,53 @@ function txDir(rec,strand){
 /* Per-assembly TSS / splice table. Both assemblies are shown even though Snaptron
    arcs are hg38-only, because the FANTOM layer covers both and a missing t2t row
    is itself informative. */
+function f5Rows(d){
+  const st=(d.fantom5||{}).stats||{}, asms=["hg38","t2t"].filter(a=>st[a]);
+  if(!asms.length) return "";
+  return '<div class="f5row"><b>FANTOM5 CAGE peaks</b> (per locus; same primary data as FANTOM CAT, so not independent evidence)'+
+    asms.map(a=>{const s=st[a];
+      if(s.no_data) return '<br><span class="mono">'+a+"</span> \u2014 not assessable (contig carries no peaks)";
+      const any=s.body||s.fkb||s.up||s.anti;
+      return '<br><span class="mono">'+a+"</span> \u2014 "+(any?
+        "body "+s.body+" sense \u00b7 first kb "+s.fkb+" \u00b7 1 kb upstream "+s.up+" \u00b7 antisense "+s.anti+
+        (s.body&&s.max_tpm!=null?" \u00b7 body max "+s.max_tpm+" TPM":"")+(s.body&&s.breadth!=null?" in "+s.breadth+" librar"+(s.breadth===1?"y":"ies")+" \u2265 1 TPM":"")+
+        (s.top?" \u00b7 top: "+esc(s.top):""):"assessed, none");}).join("")+"</div>";
+}
+/* Where the nearest sense TSS sits relative to the locus, from the signed distance
+   to the 5' end (negative = upstream; bedtools closest -D a). */
+function tssWhere(dist,span){
+  if(dist==null) return "\u2014";
+  if(dist<0) return (-dist).toLocaleString()+" bp upstream";
+  if(span==null||dist<span) return dist.toLocaleString()+" bp into body";
+  return (dist-span+1).toLocaleString()+" bp past 3\u2032 end";
+}
 function txPanel(d){
   const tx=d.tx||{}, asms=["hg38","t2t"].filter(a=>tx[a]);
-  if(!asms.length) return "";
+  if(!asms.length){ const f=f5Rows(d);
+    return f?'<div class="panel"><h2>Transcription initiation</h2>'+f+"</div>":""; }
   const strand=(coordOf(d,"hg38")||coordOf(d,"t2t")||{}).strand;
+  const tierTag=(t,lvl)=>lvl?"":' <span class="note" style="font-style:normal">('+esc(t||"permissive")+")</span>";
   const rows=asms.map(a=>{
-    const r=tx[a];
+    const r=tx[a], co=coordOf(d,a)||{}, span=co.end!=null?co.end-co.start:null;
+    const na=!r.assessable;
+    const anti=r.tss_anti_n?r.tss_anti_n+(r.tss_anti_t&&r.tss_anti_t!==r.tss_t?' <span class="note" style="font-style:normal">('+esc(r.tss_anti_t)+")</span>":""):"0";
     return "<tr><td class=mono>"+esc(a)+"</td>"+
-      "<td>"+txChip(r.tss_level,r.assessable,r.tss_anti)+"</td>"+
+      "<td>"+txChip(r.tss_level,r.assessable,false)+"</td>"+
       "<td>"+txDir({assessable:r.assessable,tss_level:r.tss_level,tss_anti:r.tss_anti},strand)+"</td>"+
-      "<td class=mono>"+fmt(r.tss_body_n)+" / "+fmt(r.tss_up_n)+"</td>"+
-      "<td class=mono>"+(r.tss5p_dist==null?"—":fmt(r.tss5p_dist)+" bp")+"</td>"+
+      "<td class=mono>"+(na?"\u2014":fmt(r.tss_body_n)+" / "+fmt(r.tss_up_n))+"</td>"+
+      "<td class=mono>"+(na?"\u2014":anti)+"</td>"+
+      "<td>"+(na?"\u2014":tssWhere(r.tss5p_dist,span)+tierTag(r.tss_t,r.tss_level))+"</td>"+
       "<td>"+txChip(r.sj_level,r.assessable,r.sj_anti)+"</td>"+
-      "<td>"+txDir({assessable:r.assessable,sj_level:r.sj_level,sj_anti:r.sj_anti},strand)+"</td>"+
-      "<td class=mono>"+fmt(r.sj_donor_n)+" / "+fmt(r.sj_acceptor_n)+"</td></tr>";
+      "<td class=mono>"+(na?"\u2014":fmt(r.sj_donor_n)+" / "+fmt(r.sj_acceptor_n))+"</td></tr>";
   }).join("");
-  return '<div class="panel"><h2>Transcription initiation &amp; splicing (FANTOM5)</h2>'+
-    '<table class="t"><tr><th>assembly<th>TSS<th>direction<th>TSS n body/up'+
-    "<th>5′ TSS dist<th>splice<th>direction<th>donor/acceptor n</tr>"+rows+"</table>"+
-    '<div class="note">Chip colour is the <b>strictest</b> tier with sense evidence '+
-    "(permissive → robust → stringent); a stringent call implies the looser tiers. "+
-    "Counts and distances are reported at the robust tier. “not assessable” means no "+
-    "FANTOM5 coverage over the element — distinct from “none”, which means assessed "+
-    "and silent.</div></div>";
+  return '<div class="panel"><h2>Transcription initiation &amp; splicing (FANTOM CAT)</h2>'+
+    '<table class="t"><tr><th>assembly<th>TSS tier<th>direction<th>sense TSS body / 1 kb up'+
+    "<th>antisense TSS<th>nearest sense TSS to 5\u2032 end<th>splice tier<th>sense donor / acceptor</tr>"+rows+"</table>"+
+    '<div class="note">Tier is the <b>strictest</b> FANTOM CAT tier with sense evidence in the body or 1 kb upstream '+
+    "(permissive \u2192 robust \u2192 stringent; a stricter tier implies the looser ones). <b>Every number in a row is "+
+    "at that row\u2019s tier</b>, or at permissive when there is no sense evidence (marked in brackets). The nearest "+
+    "sense TSS can lie outside the locus. \u201cnot assessable\u201d means no FANTOM CAT coverage over the element \u2014 "+
+    "distinct from \u201cnone\u201d, which means assessed and silent.</div>"+f5Rows(d)+"</div>";
 }
 
 /* Snaptron summary for the locus page: counts only. The arc graphic lives in the
@@ -111,18 +135,11 @@ function jxPanel(d){
    Decodes the bit-packed arcs the non-debug bundle ships (see pack_junctions.py
    for the authoritative layout):
 
-     bits 63..42 (22)  donor offset, signed, relative to the locus 5' end
-     bit  41     ( 1)  1 = junction strand differs from the locus strand
-     bits 40..19 (22)  acceptor offset, signed, same origin
-     bit  18     ( 1)  1 = an outer anchor window is pm151-easy
-     bits 17..16 ( 2)  spare
+     bits 63..41 (23)  donor offset, signed, relative to the locus 5' end
+     bit  40     ( 1)  1 = junction strand differs from the locus strand
+     bits 39..16 (24)  acceptor offset, signed, same origin
      bits 15..8  ( 8)  sample count,    10^(code/32)
      bits  7..0  ( 8)  coverage/sample, 10^(code/32)
-
-   (This block previously read 23/1/24 with the strand at bit 40 and no anchor
-   bit -- it did not match pack_junctions.py and did not match the decoder ten
-   lines below it. The decoder was correct; only the prose was wrong. Donor
-   here is the junction's 5' end, assigned from the junction's own strand.)
 
    The words arrive as decimal strings in JSON, not numbers: a 64-bit value
    exceeds Number.MAX_SAFE_INTEGER (2^53), so parsing one as a double silently
@@ -173,48 +190,44 @@ function pjxDecode(pjx, co){
   return {jx:jx, n_total: pjx.n||jx.length, shown: jx.length, packed:true};
 }
 
-function arcLane(arcs,x,w0,w1,H){
+/* Absolute support scale, identical on every locus page: width and opacity both
+   follow log10(samples) from the Snaptron floor (10): 1.0 px, 1k 2.0 px, 100k 3.0 px. */
+function jxW(sc){ return 1.0+0.5*Math.max(0,Math.min(4.6,Math.log10(Math.max(sc,10))-1)); }
+function jxO(sc){ return 0.42+0.5*Math.max(0,Math.min(1,(Math.log10(Math.max(sc,10))-1)/4)); }
+/* Arc lane. Baseline at y=H. Sense arcs (junction on the locus strand) rise above
+   it, antisense arcs hang below it, to a depth of HB. Colour = class, width and
+   opacity = absolute log support, dashed = neither 50 bp anchor mappable (pm151).
+   Each arc is a <g class="jx"> holding a wide transparent hit path and the drawn
+   path, so thin arcs are easy to hover and click. */
+function arcLane(arcs,x,w0,w1,H,lstrand,HB){
   const jx=(arcs&&arcs.jx||[]).filter(j=>j[1]>w0&&j[0]<w1);
   if(!jx.length) return "";
-  const mx=Math.max.apply(null,jx.map(j=>j[2]));
+  HB=HB||0;
   return jx.slice().sort((p,q)=>p[2]-q[2]).map(j=>{
     const a=x(j[0]), b=x(j[1]), cls=j[5]||"any";
     const col=cls==="cross"?JX_CROSS:cls==="within"?JX_WITHIN:
               cls==="unanchored"?JX_UNANCH:
               cls==="both"?JX_WITHIN:cls==="span"?JX_SPAN:
               cls==="edge"?JX_EDGE:JX_ANY;
-    // antisense arcs (packed source only, index 7) dash so a sense/antisense pair
-    // over the same interval is distinguishable rather than overplotted.
-    const anti=j.length>7&&j[7];
-    // log-scaled opacity: support spans 10 to >100k, so a linear ramp would make
-    // everything but the deepest junction invisible.
-    const op=0.25+0.65*(Math.log10(j[2])/Math.log10(Math.max(mx,11)));
-    const h=Math.min(H-2,6+H*0.55*Math.min(1,(b-a)/400));
-    // Anchor mappability (packed source only, index 8) rides stroke WIDTH, the
-    // one channel still free: colour already carries class, dash carries
-    // antisense, opacity carries support. A hairline arc means neither of the
-    // junction's outer 50bp anchors sits in a pm151 easy region, so the junction
-    // may be an artefact of unplaceable reads rather than real splicing. The flag
-    // is only meaningful when it was actually measured, hence the length check.
+    const anti=j.length>7?!!j[7]:(lstrand==="+"||lstrand==="-")&&j[3]!==lstrand;
     const measured=j.length>8, unanch=measured&&!j[8];
-    const wdt=unanch?0.5:(cls==="cross"?1.6:1);
-    return '<path d="M'+a+" "+H+" Q"+((a+b)/2)+" "+(H-h*2)+" "+b+" "+H+
-      '" fill="none" stroke="'+col+'" stroke-width="'+wdt+
-      (anti?'" stroke-dasharray="3,2':"")+
-      '" opacity="'+op.toFixed(2)+'"><title>'+esc(cls)+" junction "+
-      j[0].toLocaleString()+"–"+j[1].toLocaleString()+"  ("+
-      // A packed sample count is a log-quantised bucket, not a measurement: two
-      // junctions whose true counts differ by a few percent share one code. Printing
-      // the exact decode ("1,540 samples") would claim precision the byte does not
-      // carry, so packed values are rounded to 2 significant figures and marked "~".
-      (arcs&&arcs.packed?"~"+sig2(j[2]).toLocaleString():j[2].toLocaleString())+
-      " samples, strand "+esc(j[3])+(anti?" (antisense to locus)":"")+
-      (j[4]?", canonical motif":", non-canonical")+
-      (j.length>6&&j[6]?", "+(arcs&&arcs.packed?"~":"")+j[6].toFixed(1)+" reads/sample":"")+
-      (arcs&&arcs.packed?"  \u2014 log-quantised, \u00b14%":"")+
-      (measured?(unanch?"; NEITHER 50bp anchor mappable (pm151)"
-                      :"; \u22651 50bp anchor mappable (pm151)"):"")+
-      ")</title></path>";
+    const below=anti&&HB>0;
+    const reach=below?HB-3:H-3;
+    const h=Math.min(reach,5+reach*0.75*Math.min(1,(b-a)/420));
+    const cy=below?H+h*2:H-h*2;
+    const d='M'+a+" "+H+" Q"+((a+b)/2)+" "+cy+" "+b+" "+H;
+    const sc=j[2], wdt=jxW(sc), op=jxO(sc)*(cls==="span"?0.8:1);
+    const tip="<b>"+esc(cls==="span"?"spanning":cls)+" junction</b><br>"+
+      '<span class="k">intron:</span> '+j[0].toLocaleString()+"\u2013"+j[1].toLocaleString()+
+      " ("+(j[1]-j[0]).toLocaleString()+" bp)<br>"+
+      '<span class="k">samples:</span> '+(arcs&&arcs.packed?"~"+sig2(sc).toLocaleString():sc.toLocaleString())+
+      (arcs&&arcs.packed?" (log-quantised, \u00b14%)":"")+"<br>"+
+      '<span class="k">strand:</span> '+esc(j[3])+(anti?" \u2014 antisense to the locus (drawn below)":" \u2014 sense (drawn above)")+
+      (j.length>6&&j[6]?'<br><span class="k">coverage:</span> '+(arcs&&arcs.packed?"~":"")+j[6].toFixed(1)+" reads/sample":"")+
+      (measured?'<br><span class="k">anchors:</span> '+(unanch?"NEITHER 50 bp anchor mappable (pm151) \u2014 dashed":"\u22651 50 bp anchor mappable (pm151)"):"");
+    return '<g class="jx" data-tip="'+esc(tip)+'"><path class="hit" d="'+d+'" fill="none" stroke="transparent" stroke-width="9"/>'+
+      '<path class="vis" d="'+d+'" fill="none" stroke="'+col+'" stroke-width="'+wdt.toFixed(2)+'"'+
+      (unanch?' stroke-dasharray="5,3"':"")+' stroke-linecap="round" opacity="'+op.toFixed(2)+'"/></g>';
   }).join("");
 }
 
@@ -237,23 +250,23 @@ function arcLane(arcs,x,w0,w1,H){
    caught it by asserting the verdict text against the counts, which is why that
    assertion stays in simtu.mjs. */
 const VERDICT={
-  split_candidate_jx_supported:{t:"split candidate — junction-supported",c:"#c2452d",
+  split_candidate_jx_supported:{t:"split candidate — junction-supported",c:"var(--bad)",
     d:"Junctions are confined within individual member elements — nothing splices "+
       "from one member into another. No observed transcript ties the members "+
       "together, so the merge rests on proximity rather than shared transcription."},
-  keep_merged_jx_supported:{t:"keep merged — junction-supported",c:"#2e8b57",
+  keep_merged_jx_supported:{t:"keep merged — junction-supported",c:"var(--ok)",
     d:"Cross-element junctions connect member elements directly: a spliced "+
       "transcript runs from one member into another, so they are co-transcribed and "+
       "the merged unit is the right object to keep."},
-  jx_uninformative:{t:"junction-uninformative",c:"#8a8a92",
+  jx_uninformative:{t:"junction-uninformative",c:"var(--neutral)",
     d:"Too little junction evidence over this unit to speak either way. Absence here "+
       "is absence of data, not evidence for merging."},
-  not_chimeric:{t:"not chimeric",c:"#5a6b7a",
+  not_chimeric:{t:"not chimeric",c:"var(--jx-any)",
     d:"Single-group unit — the split question does not arise."}
 };
 
 function verdictPanel(s,arcs){
-  const v=VERDICT[s.split_verdict]||{t:s.split_verdict||"—",c:"#666",d:""};
+  const v=VERDICT[s.split_verdict]||{t:s.split_verdict||"—",c:"var(--mut)",d:""};
   return '<div class="panel"><h2>Split verdict</h2>'+
     '<div class="vbox" style="border-left:4px solid '+v.c+'"><b style="color:'+v.c+'">'+
     esc(v.t)+"</b><div class=\"note\">"+esc(v.d)+"</div></div>"+
@@ -303,13 +316,13 @@ function drawTU(t){
 
   // group colours: distinct hues per member group so a chimeric unit reads at a glance
   const groups=[...new Set(mem.map(m=>m[5]).filter(Boolean))];
-  const GC=["#3b6ea5","#c2452d","#2e8b57","#8a6bbf","#b8860b","#476b6b"];
+  const GC=["var(--cat1)","var(--cat2)","var(--cat3)","var(--cat4)","var(--cat5)","var(--cat6)"];
   const gcol=g=>GC[Math.max(0,groups.indexOf(g))%GC.length];
 
   let body="", y=0;
   // arc lane on top, so arcs visually sit above the elements they connect
   if(a.jx&&a.jx.length){
-    body+='<g transform="translate(0,'+y+')">'+laneLabel(L-6,ARCH,"junctions","#555",9.5,L-6)+
+    body+='<g transform="translate(0,'+y+')">'+laneLabel(L-6,ARCH,"junctions","var(--mut)",9.5,L-6)+
       arcLane(a,x,w0,w1,ARCH)+"</g>";
     y+=ARCH+6;
   }
@@ -317,9 +330,9 @@ function drawTU(t){
   // Grey and explicitly labelled, so it cannot be mistaken for a resolved element.
   if(!mem.length&&ext){
     body+='<g transform="translate(0,'+y+')">'+
-      laneLabel(L-6,11,"unit extent","#555",9.5,L-6)+
-      rect(x(ext[0]),0,Math.max(1,x(ext[1])-x(ext[0])),14,"#c8c8d0")+
-      lbl((x(ext[0])+x(ext[1]))/2,10,"no member mapping","#444",8,"middle",
+      laneLabel(L-6,11,"unit extent","var(--mut)",9.5,L-6)+
+      rect(x(ext[0]),0,Math.max(1,x(ext[1])-x(ext[0])),14,"var(--rep-low)")+
+      lbl((x(ext[0])+x(ext[1]))/2,10,"no member mapping","var(--ink)",8,"middle",
           fits(x(ext[1])-x(ext[0]),"no member mapping",8))+"</g>";
     y+=19;
   }
@@ -328,22 +341,22 @@ function drawTU(t){
     const [uid,cid,st,en,strand,grp]=m;
     const A=x(st), B=x(en), txt=(grp||"")+" "+(strand||"");
     body+='<g transform="translate(0,'+y+')">'+
-      laneLabel(L-6,11,grp||uid,"#555",9.5,L-6)+
+      laneLabel(L-6,11,grp||uid,"var(--mut)",9.5,L-6)+
       arrow(A,0,B,14,gcol(grp),strand).replace("M"+A,"M"+A)+
-      lbl((A+B)/2,10,txt,"#fff",8,"middle",fits(B-A,txt,8))+
+      lbl((A+B)/2,10,txt,"var(--on-strong)",8,"middle",fits(B-A,txt,8))+
       '<title>'+esc(cid||uid)+"  "+esc(grp||"")+"  "+st.toLocaleString()+"–"+
       en.toLocaleString()+" ("+esc(strand)+")</title></g>";
     y+=19;
   });
   // axis
-  let axis=line(L,y+4,W-R,y+4,"#999",1);
+  let axis=line(L,y+4,W-R,y+4,"var(--axis)",1);
   for(let i=0;i<=5;i++){const p=w0+span*i/5;
     const an=i===0?"start":(i===5?"end":"middle");
-    axis+=line(x(p),y+4,x(p),y+8,"#999",1)+
-      lbl(x(p),y+19,Math.round(p).toLocaleString(),"#666",9,an,true);}
+    axis+=line(x(p),y+4,x(p),y+8,"var(--axis)",1)+
+      lbl(x(p),y+19,Math.round(p).toLocaleString(),"var(--mut)",9,an,true);}
   axis+=lbl(L,y+33,esc(t.map_asm||"hg38")+" "+esc(t.map_chrom||a.chrom||"")+
     "  ·  window "+span.toLocaleString()+
-    " bp  ·  "+mem.length+" member element"+(mem.length===1?"":"s"),"#666",9.5,"start",true);
+    " bp  ·  "+mem.length+" member element"+(mem.length===1?"":"s"),"var(--mut)",9.5,"start",true);
 
   const leg='<div class="note"><span style="color:'+JX_CROSS+'">━</span> cross-element  '+
     '<span style="color:'+JX_WITHIN+'">━</span> within-element  '+
@@ -393,7 +406,7 @@ function renderTU(t,h){
 
   $("view").innerHTML=
     '<div class="panel"><div class="idline"><span class="cid">'+esc(t.tu_id)+"</span>"+
-    '<span class="badge">transcriptional unit v0.1</span>'+
+    '<span class="badge">transcriptional unit v0.2</span>'+
     (s.is_chimeric?'<span class="badge ambig">chimeric · '+fmt(s.n_mem_groups)+
       " groups</span>":"")+"</div>"+
     '<div class="note">Transcriptional units are the merge layer over catalogue loci; '+
@@ -425,16 +438,22 @@ function renderTU(t,h){
 
 /* TSS tick marks for the locus/TU map: a caret at the 5′ end when TSS evidence
    exists, coloured by tier and pointing in the direction of transcription. */
+/* FANTOM CAT marks on the junction lane. The sense arrow is drawn AT the nearest
+   sense TSS of the row's tier when that TSS falls in the drawn window; otherwise a
+   small flag at the 5' end says evidence exists but its position is off-window. */
 function tssMarks(rec,co,x,strand){
-  if(!rec||!rec.assessable||!rec.tss_level) return "";
-  const p=strand==="-"?co.end:co.start;
-  const c=TX_LEVEL_COL[rec.tss_level]||"#666", d=strand==="-"?-1:1;
-  const X=x(p);
-  return '<path d="M'+X+' 12 L'+X+' 2 L'+(X+7*d)+' 2 L'+(X+4*d)+' 5" fill="none" '+
-    'stroke="'+c+'" stroke-width="1.8"><title>TSS ('+esc(rec.tss_level)+
-    ") — "+(strand==="-"?"minus":"plus")+" strand, transcription "+
-    (strand==="-"?"leftward":"rightward")+"</title></path>"+
-    (rec.tss_anti?'<path d="M'+X+' 12 L'+X+' 22 L'+(X-7*d)+' 22" fill="none" '+
-      'stroke="'+JX_UNANCH+'" stroke-width="1.2" stroke-dasharray="2,1.5">'+
-      "<title>antisense TSS evidence</title></path>":"");
+  if(!rec||!rec.assessable||!rec.tss_level||!(strand==="+"||strand==="-")) return "";
+  const c=TX_LEVEL_COL[rec.tss_level]||"var(--mut)", dd=strand==="-"?-1:1;
+  const span=co.end-co.start, dist=rec.tss5p_dist;
+  const pos=dist==null?null:(strand==="+"?co.start+dist:co.end-1-dist);
+  const onmap=pos!=null&&pos>=co.start-1000&&pos<co.end+1000;
+  const where=tssWhere(dist,span);
+  const X=x(onmap?pos:(strand==="-"?co.end:co.start));
+  const tip="<b>FANTOM CAT sense TSS</b><br>"+'<span class="k">tier:</span> '+esc(rec.tss_level)+
+    (rec.tss_body_n+rec.tss_up_n?"<br>"+'<span class="k">in body / 1 kb up:</span> '+rec.tss_body_n+" / "+rec.tss_up_n:"")+
+    "<br>"+'<span class="k">nearest to 5\u2032 end:</span> '+where+
+    (onmap?"":"<br>(off the map window \u2014 this mark is a flag at the 5\u2032 end, not the TSS position)")+
+    (rec.tss5p_score!=null?"<br>"+'<span class="k">CAGE score:</span> '+rec.tss5p_score.toFixed(1):"");
+  return '<path d="M'+X+' 12 L'+X+' 2 L'+(X+7*dd)+' 2 L'+(X+4*dd)+' 5" fill="none" stroke="'+c+'" stroke-width="1.8"'+
+    (onmap?"":' stroke-dasharray="2,1.5"')+' data-tip="'+esc(tip)+'"></path>';
 }

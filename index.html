@@ -5,8 +5,8 @@
 <title>HERV catalog browser</title>
 <style>
  :root{--ink:#1b1b1f;--mut:#6b6b76;--line:#dcdce3;--bg:#fbfbfd;--pan:#fff;
-       --ltr:#3b6ea5;--int:#a5553b;--orf:#4a7c59;--dom:#8c6d3f;--gene:#7a5c8f;--acc:#2b5f8a;
-      --map1:#2f7d4f;--map2:#4a6fa5;--cage1:#c2410c;--cage2:#7c6ba0}
+}
+ :root{--ccle:#6A3D9A;--cage:#8A5A00;--ltr:#0072B2;--int:#C45000;--orf:#00855C;--dom:#AA5987;--gene:#1F2937;--rep-line:#F2C77A;--rep-sine:#A9D4F0;--rep-dna:#E6E08A;--rep-other:#E8C5DC;--rep-low:#DCDCE0;--on-strong:#ffffff;--on-rep:#2A2A33;--map1:#8F9AA8;--map2:#8F9AA8;--maptrack:#EEF0F3;--tss3:#005F48;--tss2:#009E73;--tss1:#8CD3BE;--jx-cross:#E69F00;--jx-within:#3B3B98;--jx-edge:#56B4E9;--jx-span:#A3ABB5;--jx-anti:#A3A3AD;--jx-any:#5F6B78;--guide:#AEB8C4;--axis:#9AA0A8;--cat1:#0072B2;--cat2:#D55E00;--cat3:#009E73;--cat4:#CC79A7;--cat5:#E69F00;--cat6:#56B4E9;--ok:#009E73;--bad:#D55E00;--neutral:#8A8A92;--acc:#1F4E79}
  *{box-sizing:border-box}
  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
       color:var(--ink);background:var(--bg)}
@@ -17,7 +17,7 @@
  select,input{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:5px;background:#fff}
  select{min-width:190px}
  .sw{position:relative;flex:1;min-width:280px;max-width:520px}
- input{width:100%}
+ .sw input{width:100%}
  #hint{font-size:12px;color:var(--mut);margin-top:4px;min-height:16px}
  #results{position:absolute;top:100%;left:0;right:0;z-index:40;background:#fff;
    border:1px solid var(--line);border-radius:5px;margin-top:3px;max-height:340px;overflow-y:auto;
@@ -86,11 +86,73 @@
 .txanti{color:#8a6bbf;font-size:11px}
 .txsense{color:#2e8b57;font-size:11px}
 .vbox{padding:6px 10px;background:#fafafc;margin-bottom:8px}
+ #tip{position:fixed;z-index:60;pointer-events:none;display:none;max-width:360px;
+   background:#fff;border:1px solid var(--line);border-radius:6px;padding:7px 9px;
+   box-shadow:0 6px 18px rgba(0,0,0,.14);font-size:12px;line-height:1.45;color:var(--ink)}
+ #tip b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
+ #tip .k{color:var(--mut)}
+ #tip i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:0}
+ [data-tip]{cursor:pointer}
+ #tip .tcp{display:none;margin-left:6px;font:inherit;font-size:10.5px;padding:0 5px;line-height:15px;
+   border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--mut);cursor:pointer;vertical-align:1px}
+ #tip .tcp:hover{color:var(--ink);border-color:var(--mut)}
+ #tip .tcp.ok{color:var(--ok);border-color:var(--ok)}
+ #tip .tx{display:none;position:absolute;top:3px;right:5px;border:0;background:none;font-size:15px;
+   line-height:1;color:var(--mut);cursor:pointer;padding:2px 4px}
+ #tip .tph{display:none;font-size:10.5px;color:var(--mut);margin-top:5px}
+ #tip.pinned{pointer-events:auto;user-select:text;-webkit-user-select:text;padding-right:24px;
+   border-color:var(--mut);box-shadow:0 8px 24px rgba(0,0,0,.18)}
+ #tip.pinned .tcp,#tip.pinned .tx{display:inline-block}
+ #tip.pinned .tph{display:block}
+ .acols{columns:2;column-gap:32px}
+ .acols .ai{break-inside:avoid;display:grid;grid-template-columns:150px 1fr;gap:0 10px;
+   padding:3px 0;border-bottom:1px solid #f0f0f4;font-size:13px}
+ .acols .ai>span:first-child{color:var(--mut)}
+ .absent{font-size:13px;color:var(--mut)}
+ .absent b{font-weight:500;color:var(--ink)}
+ .f5row{font-size:12.5px;margin-top:8px}
+ .f5row .mono{font-size:12px}
+ @media (max-width:900px){.acols{columns:1}}
+ button.ucsc{font:inherit;font-size:13px;background:#fff;color:var(--acc);cursor:pointer;margin-left:6px}
+ button.ucsc:hover{background:#eef4fa}
+ h2 .dlbtns{float:right;text-transform:none;letter-spacing:0}
+ h2 .dlbtns button.ucsc{font-size:11px;padding:1px 8px;margin-left:5px}
+ #fastanote:empty{display:none}
+ #gfx .jx .hit{fill:none;stroke:transparent;stroke-width:9;pointer-events:stroke}
+ #gfx .jx .vis{pointer-events:none;transition:opacity .08s}
+ #gfx svg:has(.jx:hover) .jx:not(:hover) .vis,
+ #gfx svg:has(.jx.pinhl) .jx:not(.pinhl):not(:hover) .vis{opacity:.1}
+ #gfx .jx:hover .vis,#gfx .jx.pinhl .vis{opacity:1}
+ .jxkey{display:inline-flex;align-items:center;gap:6px}
+ .jxkey svg{vertical-align:middle}
+ .ccgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 28px}
+ .ccgrid h3{font-size:12.5px;margin:0 0 4px;font-weight:600}
+ .cctop{font-size:12.5px}
+ .cctop td{padding:1px 8px 1px 0}
+ @media (max-width:900px){.ccgrid{grid-template-columns:1fr}}
+ .tabs{display:flex;gap:0;margin:0 0 10px;border-bottom:1px solid var(--line)}
+ .tabs a{font-size:13.5px;padding:7px 14px 8px;color:var(--mut);text-decoration:none;
+   border-bottom:2px solid transparent;margin-bottom:-1px}
+ .tabs a:hover{color:var(--ink)}
+ .tabs a.on{color:var(--acc);border-bottom-color:var(--acc);font-weight:600}
+ body.mode-batch .searchbar{display:none}
+ #bin{width:100%;min-height:150px;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;padding:8px;
+   border:1px solid var(--line);border-radius:5px;box-sizing:border-box}
+ .bctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
+ .bctl select{width:auto}
+ .bctl label{font-size:13px;color:var(--mut)}
+ .bsum{font-size:13px;margin:6px 0}
+ .bsum b{font-weight:600}
+ table.t tr.bnf td{color:#9a3d3d}
+ table.t tr.bamb td:nth-child(2){color:#8c6d3f;font-weight:600}
 </style>
 </head>
 <body>
 <header>
   <h1>HERV catalog browser <span id="sub">loading index…</span></h1>
+  <nav class="tabs" id="tabs" aria-label="view">
+    <a href="#" data-tab="locus" class="on">Locus search</a><a href="#batch" data-tab="batch">Batch translate</a>
+  </nav>
   <div class="searchbar">
     <select id="kspace"></select>
     <div class="sw">
@@ -103,6 +165,7 @@
 <main><div id="view"><div class="empty">Pick a system and start typing to find a locus.</div></div></main>
 
 <script>
+/*buildstamp*/const BUILD="f1dbaa5a6e8e";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
 const MAXSHOW=20, IDENT_LABEL={combined_id:"combined_id (positional)",versioned_id:"versioned_id (with version)",
   telescope_id:"telescope_id",hervd_id:"HERVd ID",ervmap_id:"ERVmap ID",ervmap_alt_name:"ERVmap alt name",
   subramanian_id:"Subramanian 2011 locus (HML-2)",hml2_k_number:"HML-2 K-number (Subramanian)",
@@ -183,8 +246,8 @@ async function boot_(){
   o3.textContent="locus_uid — internal joining key  ("+FZ.uids.length.toLocaleString()+")";
   g3.appendChild(o3);
   // tu_id, same contract as locus_uid: exact prefix match, opt-in, and excluded
-  // from fuzzy search. A tu_id is a coordinate-derived label (CHIMERIC_1q22a,
-  // HML2_5p13b) whose prefix describes the unit's composition, not a family a
+  // from fuzzy search. A tu_id is a coordinate-derived label (TU_CHIMERIC_1q22a,
+  // TU_HML2_5p13b) whose prefix describes the unit's composition, not a family a
   // locus belongs to -- in general search it would compete with real family names.
   // Present only when the TU shard set was built (--debug-local).
   if(TUMETA){
@@ -199,6 +262,110 @@ async function boot_(){
   $("q").addEventListener("keydown",onKey);
   document.addEventListener("click",e=>{if(!e.target.closest(".sw"))hide();});
   onType();
+  UPOS=new Map(); FZ.uids.forEach((u,i)=>UPOS.set(u,i));
+  if(typeof window!=="undefined"&&window.addEventListener) window.addEventListener("hashchange",route);
+  route();
+}
+/* URL routing. #batch opens the batch view; #<locus_uid> opens a locus. Opening a
+   locus any other way sets the hash with replaceState (no history entry, no
+   hashchange), so the address bar always holds a shareable link. */
+let LASTUID=null, EMPTYVIEW=null;
+function setMode(m){
+  if(!document.body||!document.body.classList) return;
+  document.body.classList.toggle("mode-batch",m==="batch");
+  document.querySelectorAll("#tabs a").forEach(a=>a.classList.toggle("on",a.dataset.tab===m));
+  const lt=document.querySelector('#tabs a[data-tab="locus"]'); if(lt) lt.setAttribute("href","#"+(LASTUID||""));
+}
+async function route(){
+  const h=decodeURIComponent(location.hash.slice(1));
+  if(EMPTYVIEW==null) EMPTYVIEW=$("view").innerHTML;
+  if(h==="batch"){ setMode("batch"); return renderBatch(); }
+  setMode("locus");
+  if(!h&&$("bin")){ $("view").innerHTML=EMPTYVIEW; $("q").focus(); return; }
+  if(h&&UPOS&&UPOS.has(h)){
+    try{ const d=await getLocus(h); if(d) render(d,{k:h,kind:"i",type:"uid",uids:[h],cur:1}); }
+    catch(e){ showError("Loading locus",e); }
+  }
+}
+/* ---------------------------------------------------------------- batch view */
+let UPOS=null, VER=null, BATCH={text:"",type:"*",collapse:false,out:null};
+function verOf(i){
+  if(!VER){ VER=new Array(FZ.uids.length).fill("");
+    const vt=FZ.types.indexOf("versioned_id");
+    FZ.post.forEach(pl=>pl.forEach(p=>{ if(p[1]===vt) VER[p[0]]=p[2]; })); }
+  return VER[i];
+}
+/* One input -> distinct loci. Same rules as the search box: keys are compared
+   after nrm() (case and punctuation folded). A literal match is preferred over a
+   folded one; the HERV/ERV-prefix-collapsed tier is used only when asked for,
+   because K-10 and ERVK-10 are different loci. */
+function batchResolve(tok,type,collapse){
+  const raw=tok.trim(); if(!raw) return {hits:[]};
+  if(type==="uid"||(type==="*"&&UPOS.has(raw))){
+    const i=UPOS.get(raw); return {hits:i==null?[]:[{i,t:"locus_uid",s:raw,m:"exact"}]};
+  }
+  const tix=type==="*"?-1:FZ.types.indexOf(type);
+  let hits=[];
+  const add=(ki,m)=>{ for(const p of FZ.post[ki]) if(tix<0||p[1]===tix)
+    hits.push({i:p[0],t:FZ.types[p[1]],s:p[2],m:m==="norm"&&p[2]===raw?"exact":m}); };
+  const ki=KPOS.get(nrm(raw)); if(ki!=null) add(ki,"norm");
+  if(hits.some(h=>h.m==="exact")) hits=hits.filter(h=>h.m==="exact");
+  if(!hits.length&&collapse){ const ci=CPOS.get(nrmc(raw)); if(ci!=null) for(const k of FZ.cmap[ci]) add(k,"collapsed"); }
+  return {hits};
+}
+function batchRun(){
+  BATCH.text=$("bin").value; BATCH.type=$("btype").value; BATCH.collapse=$("bcol").checked;
+  const toks=BATCH.text.split(/[\n\r,\t;]+/).map(s=>s.trim()).filter(Boolean);
+  const LIM=20000, over=toks.length>LIM, rows=[];
+  let nu=0,na=0,nn=0;
+  for(const tok of toks.slice(0,LIM)){
+    const {hits}=batchResolve(tok,BATCH.type,BATCH.collapse);
+    const by=new Map(); for(const h of hits){ if(!by.has(h.i)) by.set(h.i,{m:h.m,t:new Set(),s:new Set()});
+      const e=by.get(h.i); e.t.add(h.t); e.s.add(h.s); if(h.m==="exact") e.m="exact"; }
+    if(!by.size){ nn++; rows.push({input:tok,status:"not found"}); continue; }
+    const st=by.size===1?"unique":"ambiguous ("+by.size+" loci)"; by.size===1?nu++:na++;
+    for(const [i,e] of by){ const r=LM.rows[i];
+      rows.push({input:tok,status:st,match:e.m==="norm"?"case/punctuation-folded":e.m,
+        matched_as:[...e.t].join(";"),matched_string:[...e.s].join(";"),locus_uid:FZ.uids[i],
+        combined_id:r[0],versioned_id:verOf(i),group:LM.groups[r[1]]||"",
+        hg38:r[3]>=0&&r[4]>=0?LM.chroms[r[3]]+":"+(r[4]+1)+"-"+r[5]:""}); }
+  }
+  BATCH.out={rows,n:toks.length,nu,na,nn,over};
+  renderBatch();
+}
+const BCOLS=["input","status","match","matched_as","matched_string","locus_uid","combined_id","versioned_id","group","hg38"];
+function batchTSV(){ return [BCOLS.join("\t")].concat(BATCH.out.rows.map(r=>BCOLS.map(c=>r[c]==null?"":String(r[c]).replace(/[\t\n]/g," ")).join("\t"))).join("\n")+"\n"; }
+function renderBatch(){
+  if(location.hash!=="#batch") history.replaceState(null,"","#batch");
+  setMode("batch");
+  const types=[["*","any identifier or locus_uid"]].concat(FZ.types.map(t=>[t,IDENT_LABEL[t]||t])).concat([["uid","locus_uid only"]]);
+  const o=BATCH.out;
+  const tbl=o?'<div class="bsum"><b>'+o.n.toLocaleString()+"</b> inputs \u00b7 <b>"+o.nu.toLocaleString()+
+      "</b> unique \u00b7 <b>"+o.na.toLocaleString()+"</b> ambiguous \u00b7 <b>"+o.nn.toLocaleString()+"</b> not found"+
+      (o.over?" \u00b7 only the first 20,000 translated":"")+
+      ' <button class="ucsc" id="bcopy">copy TSV</button><button class="ucsc" id="bdl">download TSV</button></div>'+
+      '<div style="overflow-x:auto"><table class="t"><tr>'+BCOLS.map(c=>"<th>"+esc(c.replace(/_/g," "))).join("")+"</tr>"+
+      o.rows.slice(0,2000).map(r=>'<tr class="'+(r.status==="not found"?"bnf":r.status.startsWith("amb")?"bamb":"")+'">'+
+        BCOLS.map(c=>c==="combined_id"&&r.locus_uid?'<td class="mono"><a href="#'+esc(r.locus_uid)+'">'+esc(r[c])+"</a></td>":
+          "<td"+(/_id|uid|hg38|input|string/.test(c)?' class="mono"':"")+">"+esc(r[c]==null?"":r[c])+"</td>").join("")+"</tr>").join("")+
+      "</table></div>"+(o.rows.length>2000?'<div class="note">showing the first 2,000 of '+o.rows.length.toLocaleString()+
+      " rows; copy or download for all</div>":""):"";
+  $("view").innerHTML='<div class="panel"><h2>Batch translate identifiers</h2>'+
+    '<div class="note" style="margin-bottom:6px">One identifier per line (commas, tabs and semicolons also separate). '+
+    "Matching folds case and punctuation, as the search box does; a literal match wins over a folded one. An input that "+
+    "names several loci gets one row per locus, marked ambiguous. Positions are hg38, 1-based. Runs in your browser; "+
+    "nothing is sent anywhere.</div>"+
+    '<textarea id="bin" spellcheck="false" placeholder="HML2_1q22&#10;K102&#10;ERVK-7&#10;HERVL022701">'+esc(BATCH.text)+"</textarea>"+
+    '<div class="bctl"><label>match against <select id="btype">'+types.map(t=>'<option value="'+t[0]+'"'+
+      (t[0]===BATCH.type?" selected":"")+">"+esc(t[1])+"</option>").join("")+"</select></label>"+
+    '<label><input type="checkbox" id="bcol"'+(BATCH.collapse?" checked":"")+'> also allow HERV/ERV-prefix-collapsed matches '+
+    "(K-10 \u2248 ERVK-10; flagged)</label>"+
+    '<button class="ucsc" id="brun" style="margin-left:auto">translate</button></div>'+tbl+"</div>";
+  $("brun").onclick=batchRun;
+  if(o){ $("bdl").onclick=()=>saveBlob(new Blob([batchTSV()],{type:"text/tab-separated-values"}),"herv_batch_translation.tsv");
+    $("bcopy").onclick=()=>{ const b=$("bcopy"), v=batchTSV();
+      (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v):Promise.reject()).then(
+        ()=>{b.textContent="copied";setTimeout(()=>b.textContent="copy TSV",1200);},()=>{b.textContent="copy failed \u2014 use download";}); }; }
 }
 function hide(){$("results").classList.remove("on");curSel=-1;}
 
@@ -316,7 +483,7 @@ function onType(){
 
   if(kind==="t"){ // tu_id, explicitly selected -- exact prefix, never fuzzy
     if(!raw){hide();$("hint").textContent=TUMETA.n_units.toLocaleString()+
-      " transcriptional units — CHIMERIC_/<group>_<band> (prefix describes the unit)";return;}
+      " transcriptional units — TU_<group>_<band> (group describes the unit)";return;}
     const hits=[];
     for(let i=lb(TUIDS,qs);i<TUIDS.length&&hits.length<MAXSHOW*3;i++){
       if(!TUIDS[i].toUpperCase().startsWith(qs))break;
@@ -513,7 +680,18 @@ async function getTU(tid){
   }
   return tuShardCache.get(b)[tid];
 }
+/* lookup.json.gz: per-group / per-superfamily facts and the RepeatMasker
+   (name, class, family) dictionary, shipped once instead of in every record. */
+let LOOKUP=null;
+async function loadLookup(){
+  if(LOOKUP) return LOOKUP;
+  const r=await fetch("data/lookup.json.gz");
+  if(!r.ok) throw new Error("lookup.json.gz fetch failed: HTTP "+r.status);
+  LOOKUP=JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text());
+  return LOOKUP;
+}
 async function getLocus(uid){
+  await loadLookup();
   const b=djb2(uid)%NB;
   if(!shardCache.has(b)){
     const r=await fetch("data/loci/"+b+".json.gz");
@@ -591,7 +769,70 @@ function drawList(){
     }catch(err){ showError("Loading locus",err); }});
 }
 </script>
-<script src="detail.js"></script>
-<script src="tx.js"></script>
-<script>boot();</script>
+<script src="detail.js?v=f1dbaa5a6e8e"></script>
+<script src="tx.js?v=f1dbaa5a6e8e"></script>
+<div id="tip"></div>
+<script>
+/* Hover cards: any element with data-tip (HTML, pre-escaped).
+   Hover shows the card beside the pointer. CLICK pins it: the card stops following
+   the pointer, scrolls with the page, its text is selectable, and copy buttons
+   appear for the name and the position. Clicking another feature re-pins to that
+   one; the x, Esc, or a click anywhere else closes it. */
+(function(){
+  const tip=document.getElementById("tip");
+  let pinned=null;
+  function place(cx,cy,abs){
+    tip.style.display="block";
+    const r=tip.getBoundingClientRect(), W=innerWidth, H=innerHeight;
+    let X=cx+14, Y=cy+14;
+    if(X+r.width>W-6) X=Math.max(6,cx-r.width-14);
+    if(Y+r.height>H-6) Y=Math.max(6,cy-r.height-14);
+    tip.style.position=abs?"absolute":"fixed";
+    tip.style.left=(X+(abs?scrollX:0))+"px"; tip.style.top=(Y+(abs?scrollY:0))+"px";
+  }
+  function fill(t){
+    tip.innerHTML=t.getAttribute("data-tip")+
+      '<button class="tx" title="close (Esc)" aria-label="close">\u00d7</button>'+
+      '<div class="tph">pinned \u2014 select text or use copy; Esc or click elsewhere to close</div>';
+    tip._src=t;
+  }
+  function unpin(){ if(pinned&&pinned.classList) pinned.classList.remove("pinhl");
+    pinned=null; tip.classList.remove("pinned"); tip.style.display="none"; tip._src=null; }
+  // a hovered junction arc is moved to the end of its group so it draws on top
+  document.addEventListener("mouseover",e=>{
+    const g=e.target.closest&&e.target.closest("#gfx .jx");
+    if(g&&g.parentNode&&g.parentNode.lastElementChild!==g) g.parentNode.appendChild(g);
+  });
+  document.addEventListener("mousemove",e=>{
+    if(pinned) return;
+    const t=e.target.closest&&e.target.closest("[data-tip]");
+    if(!t){tip.style.display="none";return;}
+    if(tip._src!==t) fill(t);
+    place(e.clientX,e.clientY,false);
+  });
+  document.addEventListener("click",e=>{
+    const c=e.target.closest&&e.target.closest("#tip .tcp");
+    if(c){
+      const v=c.getAttribute("data-copy"), done=()=>{c.textContent="copied";c.classList.add("ok");
+        setTimeout(()=>{c.textContent="copy";c.classList.remove("ok");},1200);};
+      if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(done,()=>{});
+      else { const ta=document.createElement("textarea"); ta.value=v; document.body.appendChild(ta);
+             ta.select(); try{document.execCommand("copy");done();}catch(_){} ta.remove(); }
+      return;
+    }
+    if(e.target.closest&&e.target.closest("#tip .tx")){ unpin(); return; }
+    if(e.target.closest&&e.target.closest("#tip")) return;       // selecting text inside
+    const t=e.target.closest&&e.target.closest("[data-tip]");
+    if(t){ if(pinned&&pinned.classList) pinned.classList.remove("pinhl");
+      fill(t); pinned=t; if(t.classList) t.classList.add("pinhl");
+      tip.classList.add("pinned"); place(e.clientX,e.clientY,true); return; }
+    if(pinned) unpin();
+  });
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&pinned) unpin(); });
+  document.addEventListener("mouseleave",()=>{ if(!pinned) tip.style.display="none"; });
+  // a re-render replaces the graphic; a card pinned to a vanished element closes
+  new MutationObserver(()=>{ if(pinned&&!document.contains(pinned)) unpin(); })
+    .observe(document.getElementById("view"),{childList:true,subtree:true});
+})();
+boot();</script>
 </body></html>
