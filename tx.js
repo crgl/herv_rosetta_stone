@@ -199,7 +199,10 @@ function jxO(sc){ return 0.42+0.5*Math.max(0,Math.min(1,(Math.log10(Math.max(sc,
    opacity = absolute log support, dashed = neither 50 bp anchor mappable (pm151).
    Each arc is a <g class="jx"> holding a wide transparent hit path and the drawn
    path, so thin arcs are easy to hover and click. */
-function arcLane(arcs,x,w0,w1,H,lstrand,HB){
+function arcLane(arcs,x,w0,w1,H,lstrand,HB,jb){
+  const TMm=(typeof LOOKUP!=="undefined"&&LOOKUP&&LOOKUP.tissue)||null, MAPm=TMm&&TMm.map;
+  const FLG=["","shared between loci \u2014 excluded from the splicing share","same reads counted at another locus \u2014 excluded",
+             "possibly shared between loci (kept)","repeat within this locus"];
   const jx=(arcs&&arcs.jx||[]).filter(j=>j[1]>w0&&j[0]<w1);
   if(!jx.length) return "";
   HB=HB||0;
@@ -224,7 +227,13 @@ function arcLane(arcs,x,w0,w1,H,lstrand,HB){
       (arcs&&arcs.packed?" (log-quantised, \u00b14%)":"")+"<br>"+
       '<span class="k">strand:</span> '+esc(j[3])+(anti?" \u2014 antisense to the locus (drawn below)":" \u2014 sense (drawn above)")+
       (j.length>6&&j[6]?'<br><span class="k">coverage:</span> '+(arcs&&arcs.packed?"~":"")+j[6].toFixed(1)+" reads/sample":"")+
-      (measured?'<br><span class="k">anchors:</span> '+(unanch?"NEITHER 50 bp anchor mappable (pm151) \u2014 dashed":"\u22651 50 bp anchor mappable (pm151)"):"");
+      (measured?'<br><span class="k">anchors:</span> '+(unanch?"NEITHER 50 bp anchor mappable (pm151) \u2014 dashed":"\u22651 50 bp anchor mappable (pm151)"):"")+
+      (()=>{ const b=jb&&MAPm?jb[j[0]+"-"+j[1]+j[3]]:null; if(!b) return "";
+        const RL=["GTEx normal","TCGA normal","TCGA tumour"], top=(b[4]||[]).map(t=>esc(TMm.groups[t[0]][1])+" "+(t[1]<10?"<1":Math.round(t[1]/10))+"%").join(", ");
+        return '<br><span class="k">TCGA / GTEx groups using it:</span> '+RL.map((l,i)=>l+" "+b[i]+"/"+MAPm.kind_n_jx[i]).join(" \u00b7 ")+
+          ' <span class="k">(\u2265 3 split reads in \u2265 '+Math.round(100*MAPm.min_share)+'% of samples)</span>'+
+          (top?'<br><span class="k">highest shares:</span> '+top:"")+
+          (b[5]?'<br><span class="k">non-unique:</span> '+FLG[b[5]]:""); })();
     return '<g class="jx" data-tip="'+esc(tip)+'"><path class="hit" d="'+d+'" fill="none" stroke="transparent" stroke-width="9"/>'+
       '<path class="vis" d="'+d+'" fill="none" stroke="'+col+'" stroke-width="'+wdt.toFixed(2)+'"'+
       (unanch?' stroke-dasharray="5,3"':"")+' stroke-linecap="round" opacity="'+op.toFixed(2)+'"/></g>';

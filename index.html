@@ -6,7 +6,7 @@
 <style>
  :root{--ink:#1b1b1f;--mut:#6b6b76;--line:#dcdce3;--bg:#fbfbfd;--pan:#fff;
 }
- :root{--ccle:#6A3D9A;--cage:#8A5A00;--ltr:#0072B2;--int:#C45000;--orf:#00855C;--dom:#AA5987;--gene:#1F2937;--rep-line:#F2C77A;--rep-sine:#A9D4F0;--rep-dna:#E6E08A;--rep-other:#E8C5DC;--rep-low:#DCDCE0;--on-strong:#ffffff;--on-rep:#2A2A33;--map1:#8F9AA8;--map2:#8F9AA8;--maptrack:#EEF0F3;--tss3:#005F48;--tss2:#009E73;--tss1:#8CD3BE;--jx-cross:#E69F00;--jx-within:#3B3B98;--jx-edge:#56B4E9;--jx-span:#A3ABB5;--jx-anti:#A3A3AD;--jx-any:#5F6B78;--guide:#AEB8C4;--axis:#9AA0A8;--cat1:#0072B2;--cat2:#D55E00;--cat3:#009E73;--cat4:#CC79A7;--cat5:#E69F00;--cat6:#56B4E9;--ok:#009E73;--bad:#D55E00;--neutral:#8A8A92;--acc:#1F4E79}
+ :root{--ccle:#6A3D9A;--cage:#8A5A00;--ltr:#0072B2;--int:#C45000;--orf:#00855C;--hvo:#00855C;--u3:#A9CDEB;--rr:#0072B2;--u5:#5B9BD5;--dom:#AA5987;--gene:#1F2937;--rep-line:#F2C77A;--rep-sine:#A9D4F0;--rep-dna:#E6E08A;--rep-other:#E8C5DC;--rep-low:#DCDCE0;--on-strong:#ffffff;--on-rep:#2A2A33;--map1:#8F9AA8;--map2:#8F9AA8;--maptrack:#EEF0F3;--tss3:#005F48;--tss2:#009E73;--tss1:#8CD3BE;--jx-cross:#E69F00;--jx-within:#3B3B98;--jx-edge:#56B4E9;--jx-span:#A3ABB5;--jx-anti:#A3A3AD;--jx-any:#5F6B78;--guide:#AEB8C4;--axis:#9AA0A8;--cat1:#0072B2;--cat2:#D55E00;--cat3:#009E73;--cat4:#CC79A7;--cat5:#E69F00;--cat6:#56B4E9;--ok:#009E73;--bad:#D55E00;--neutral:#8A8A92;--acc:#1F4E79}
  *{box-sizing:border-box}
  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
       color:var(--ink);background:var(--bg)}
@@ -55,6 +55,14 @@
    font-size:12px;text-decoration:none;margin-right:7px}
  .ucsc:hover{background:#eef4fa}
  .lg{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin-top:6px}
+ .covctl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--mut);margin:0 0 6px 110px}
+ .covctl .k{margin-right:2px}
+ .covbtn{font:inherit;font-size:11px;padding:2px 9px;border:1px solid var(--line);background:#fff;border-radius:4px;cursor:pointer;color:var(--ink)}
+ .covbtn.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+ .covchip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:10px;padding:1px 7px;background:#fff;color:var(--ink)}
+ .covchip i{display:inline-block;width:10px;height:3px}
+ .covchip a{color:var(--mut);text-decoration:none}
+ .covctl select{font:inherit;font-size:11px;padding:1px 4px}
  .lg i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:4px;vertical-align:-1px}
  .note{font-size:12px;color:var(--mut);font-style:italic;margin-top:6px}
  /* A note that reports a discrepancy rather than context -- must not read as
@@ -126,6 +134,13 @@
  .jxkey{display:inline-flex;align-items:center;gap:6px}
  .jxkey svg{vertical-align:middle}
  .ccgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 28px}
+ .tsall{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px}
+ @media (max-width:1000px){.tsall{grid-template-columns:1fr}}
+ details.tsja{margin:8px 0 4px;font-size:12.5px} details.tsja summary{cursor:pointer}
+ table.tsjat td{vertical-align:top;font-variant-numeric:tabular-nums}
+ .tsflag{background:#FFF4E5;border-left:3px solid var(--cat5);padding:7px 10px;margin:4px 0 10px;font-size:12.5px;border-radius:3px}
+ button.tsv.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+ table.tstvn td{vertical-align:middle;font-variant-numeric:tabular-nums}
  .ccgrid h3{font-size:12.5px;margin:0 0 4px;font-weight:600}
  .cctop{font-size:12.5px}
  .cctop td{padding:1px 8px 1px 0}
@@ -145,6 +160,10 @@
  .bsum b{font-weight:600}
  table.t tr.bnf td{color:#9a3d3d}
  table.t tr.bamb td:nth-child(2){color:#8c6d3f;font-weight:600}
+ footer#refs{max-width:1180px;margin:28px auto 36px;padding:0 16px;font-size:12.5px;color:var(--ink)}
+ footer#refs summary{cursor:pointer;font-weight:600;color:var(--mut)}
+ footer#refs h3{font-size:12.5px;margin:12px 0 4px} footer#refs ul{margin:0;padding-left:18px}
+ footer#refs li{margin:2px 0;line-height:1.4} footer#refs .ru{color:var(--mut)}
 </style>
 </head>
 <body>
@@ -163,13 +182,66 @@
   </div>
 </header>
 <main><div id="view"><div class="empty">Pick a system and start typing to find a locus.</div></div></main>
+<!-- REFS -->
+<footer id="refs"><details><summary>Data sources and citations (42)</summary>
+<p class="note" style="font-style:normal">This browser combines the public resources below. If you use it, please cite the resources behind the data you rely on. The full list, including tools used only in the analyses, is <code>REFERENCES.md</code> in the export.</p>
+<h3>HERV and repeat annotation</h3><ul>
+<li>Bendall et al. (2019) Telescope: Characterization of the retrotranscriptome by accurate estimation of transposable element expression. <i>PLoS Comput Biol</i> 15:e1006453. <a href="https://doi.org/10.1371/journal.pcbi.1006453">doi:10.1371/journal.pcbi.1006453</a> <span class="ru">— Telescope retro.hg38 annotation (locus anchor) and method of the CCLE Telescope TPM readout</span></li>
+<li>Tokuyama et al. (2018) ERVmap analysis reveals genome-wide transcription of human endogenous retroviruses. <i>PNAS</i> 115:12565-12572. <a href="https://doi.org/10.1073/pnas.1814589115">doi:10.1073/pnas.1814589115</a> <span class="ru">— ERVmap proviral loci</span></li>
+<li>Nakagawa &amp; Takahashi (2016) gEVE: a genome-based endogenous viral element database provides comprehensive viral protein-coding sequences in mammalian genomes. <i>Database</i> 2016:baw087. <a href="https://doi.org/10.1093/database/baw087">doi:10.1093/database/baw087</a> <span class="ru">— gEVE loci and ORFs (map lane)</span></li>
+<li>Li et al. (2024) HervD Atlas: a curated knowledgebase of associations between human endogenous retroviruses and diseases. <i>Nucleic Acids Res</i> 52:D1315-D1326. <a href="https://doi.org/10.1093/nar/gkad904">doi:10.1093/nar/gkad904</a> <span class="ru">— HervD Atlas HERV terms and elements</span></li>
+<li>Vargiu et al. (2016) Classification and characterization of human endogenous retroviruses; mosaic forms are common. <i>Retrovirology</i> 13:7. <a href="https://doi.org/10.1186/s12977-015-0232-y">doi:10.1186/s12977-015-0232-y</a> <span class="ru">— RetroTector HERV classification (Vargiu et al. supplement)</span></li>
+<li>Sperber et al. (2007) Automated recognition of retroviral sequences in genomic data—RetroTector©. <i>Nucleic Acids Res</i> 35:4964-4976. <a href="https://doi.org/10.1093/nar/gkm515">doi:10.1093/nar/gkm515</a> <span class="ru">— RetroTector program</span></li>
+<li>Montserrat-Ayuso et al. (2026) A comprehensive annotation of conserved protein domains in human endogenous retroviruses. <i>NAR Genom Bioinform</i> 8:lqag013. <a href="https://doi.org/10.1093/nargab/lqag013">doi:10.1093/nargab/lqag013</a> <span class="ru">— HERVarium conserved protein domains (map lane)</span></li>
+<li>Montserrat-Ayuso et al. (2026) Regulatory Features and Functional Specialization of Human Endogenous Retroviral LTRs: A Genome-Wide Annotation and Analysis via HERVarium. <i>bioRxiv (preprint)</i>. <a href="https://doi.org/10.64898/2026.02.17.706328">doi:10.64898/2026.02.17.706328</a> <span class="ru">— HERVarium LTR structure and U3/R/U5 annotation</span></li>
+<li>Montserrat-Ayuso T, Pujol A, Esteve-Codina A. HERVarium data: Domain-level annotation of HERVs in GRCh38 (Zenodo, 2025) <a href="https://doi.org/10.5281/zenodo.17662456">doi.org/10.5281/zenodo.17662456</a> ; Structural annotation and TF motif mapping of HERV LTRs (Zenodo, 2026) <a href="https://doi.org/10.5281/zenodo.19593457">doi.org/10.5281/zenodo.19593457</a> ; application <a href="https://github.com/funcgen/HERVarium">github.com/funcgen/HERVarium</a> <span class="ru">— HERVarium v5 element names, U3/R/U5 segments, PBS/PPT and domains (catalog loci, aliases, map lane)</span></li>
+<li>Blanco-Melo Lab, Fred Hutchinson Cancer Center. ERV Navigator (unpublished). <a href="https://ervnavigator.fredhutch.org/">ervnavigator.fredhutch.org</a> <span class="ru">— ERV Navigator loci, intactness categories and lineage paths (missillac_id aliases)</span></li>
+<li>HERVOminer ORF annotation of ERVmap loci, hg38 and T2T-CHM13 (unpublished; files supplied to this project). <span class="ru">— HERVOminer six-frame ORFs (hervominer_orf; map lane)</span></li>
+<li>Storer et al. (2021) The Dfam community resource of transposable element families, sequence models, and genome annotations. <i>Mobile DNA</i> 12:2. <a href="https://doi.org/10.1186/s13100-020-00230-y">doi:10.1186/s13100-020-00230-y</a> <span class="ru">— Dfam families, hg38 and hs1 annotations, consensus alignments</span></li>
+<li>Bao et al. (2015) Repbase Update, a database of repetitive elements in eukaryotic genomes. <i>Mobile DNA</i> 6:11. <a href="https://doi.org/10.1186/s13100-015-0041-9">doi:10.1186/s13100-015-0041-9</a> <span class="ru">— RepBase consensus names</span></li>
+<li>Subramanian et al. (2011) Identification, characterization, and comparative genomic distribution of the HERV-K (HML-2) group of human endogenous retroviruses. <i>Retrovirology</i> 8:90. <a href="https://doi.org/10.1186/1742-4690-8-90">doi:10.1186/1742-4690-8-90</a> <span class="ru">— HML-2 locus nomenclature and coordinates</span></li>
+<li>Gifford et al. (2018) Nomenclature for endogenous retrovirus (ERV) loci. <i>Retrovirology</i> 15:59. <a href="https://doi.org/10.1186/s12977-018-0442-1">doi:10.1186/s12977-018-0442-1</a> <span class="ru">— ERV locus nomenclature conventions</span></li>
+<li>Seal et al. (2023) Genenames.org: the HGNC resources in 2023. <i>Nucleic Acids Res</i> 51:D1003-D1009. <a href="https://doi.org/10.1093/nar/gkac888">doi:10.1093/nar/gkac888</a> <span class="ru">— HGNC ERV gene symbols (aliases)</span></li>
+<li>Smit AFA, Hubley R, Green P. RepeatMasker Open-4.0. 2013–2015. <a href="http://www.repeatmasker.org">repeatmasker.org</a> <span class="ru">— RepeatMasker annotation (UCSC rmsk, hg38 and hs1; map lane)</span></li>
+</ul>
+<h3>Genomes, gene models, mappability</h3><ul>
+<li>Nurk et al. (2022) The complete sequence of a human genome. <i>Science</i> 376:44-53. <a href="https://doi.org/10.1126/science.abj6987">doi:10.1126/science.abj6987</a> <span class="ru">— T2T-CHM13 (hs1) assembly</span></li>
+<li>Kent et al. (2002) The Human Genome Browser at UCSC. <i>Genome Res</i> 12:996-1006. <a href="https://doi.org/10.1101/gr.229102">doi:10.1101/gr.229102</a> <span class="ru">— UCSC Genome Browser (tracks, liftOver chains, REST sequence API)</span></li>
+<li>Perez et al. (2025) The UCSC Genome Browser database: 2025 update. <i>Nucleic Acids Res</i> 53:D1243-D1249. <a href="https://doi.org/10.1093/nar/gkae974">doi:10.1093/nar/gkae974</a> <span class="ru">— UCSC Genome Browser database (current release)</span></li>
+<li>Mudge et al. (2025) GENCODE 2025: reference gene annotation for human and mouse. <i>Nucleic Acids Res</i> 53:D966-D975. <a href="https://doi.org/10.1093/nar/gkae1078">doi:10.1093/nar/gkae1078</a> <span class="ru">— GENCODE v50 gene models and transcript context</span></li>
+<li>O&#x27;Leary et al. (2016) Reference sequence (RefSeq) database at NCBI: current status, taxonomic expansion, and functional annotation. <i>Nucleic Acids Res</i> 44:D733-D745. <a href="https://doi.org/10.1093/nar/gkv1189">doi:10.1093/nar/gkv1189</a> <span class="ru">— RefSeq gene models (hs1 lane)</span></li>
+<li>Morales et al. (2022) A joint NCBI and EMBL-EBI transcript set for clinical genomics and research. <i>Nature</i> 604:310-315. <a href="https://doi.org/10.1038/s41586-022-04558-8">doi:10.1038/s41586-022-04558-8</a> <span class="ru">— MANE Select transcripts (host-gene context)</span></li>
+<li>Karimzadeh et al. (2018) Umap and Bismap: quantifying genome and methylome mappability. <i>Nucleic Acids Res</i>. <a href="https://doi.org/10.1093/nar/gky677">doi:10.1093/nar/gky677</a> <span class="ru">— Umap k100 mappability (map lane)</span></li>
+<li>Li (2025) Finding easy regions for short-read variant calling from pangenome data. <i>GigaScience</i> 14:giaf103. <a href="https://doi.org/10.1093/gigascience/giaf103">doi:10.1093/gigascience/giaf103</a> <span class="ru">— Panmask pm151 easy regions (map lane, junction anchors)</span></li>
+</ul>
+<h3>Expression, splicing and TSS evidence</h3><ul>
+<li>Russ &amp; Iordanskiy (2025) Strict retroelement regulation is frequently lost following cancer transformation and generates a promising reservoir of cancer biomarkers. <i>Mobile DNA</i> 16:37. <a href="https://doi.org/10.1186/s13100-025-00376-7">doi:10.1186/s13100-025-00376-7</a> <span class="ru">— CCLE and RNA Atlas Telescope TPM readouts (RetroelementDB; https://retroelementdb.com/)</span></li>
+<li>Lorenzi et al. (2021) The RNA Atlas expands the catalog of human non-coding RNAs. <i>Nature Biotechnology</i> 39:1453-1465. <a href="https://doi.org/10.1038/s41587-021-00936-1">doi:10.1038/s41587-021-00936-1</a> <span class="ru">— RNA Atlas samples (GSE138734): tissues, cell types and cell lines, polyA and total RNA</span></li>
+<li>The FANTOM Consortium and the RIKEN PMI and CLST (DGT) (2014) A promoter-level mammalian expression atlas. <i>Nature</i> 507:462-470. <a href="https://doi.org/10.1038/nature13182">doi:10.1038/nature13182</a> <span class="ru">— FANTOM5 CAGE peaks (map lane)</span></li>
+<li>Lizio et al. (2015) Gateways to the FANTOM5 promoter level mammalian expression atlas. <i>Genome Biol</i> 16:22. <a href="https://doi.org/10.1186/s13059-014-0560-6">doi:10.1186/s13059-014-0560-6</a> <span class="ru">— FANTOM5 data resources</span></li>
+<li>Hon et al. (2017) An atlas of human long non-coding RNAs with accurate 5′ ends. <i>Nature</i> 543:199-204. <a href="https://doi.org/10.1038/nature21374">doi:10.1038/nature21374</a> <span class="ru">— FANTOM CAT transcript models and TSSs</span></li>
+<li>Gu et al. (2024) TE-TSS: an integrated data resource of human and mouse transposable element (TE)-derived transcription start site (TSS). <i>Nucleic Acids Res</i> 52:D322-D333. <a href="https://doi.org/10.1093/nar/gkad1048">doi:10.1093/nar/gkad1048</a> <span class="ru">— TE-TSS reference</span></li>
+<li>Wilks et al. (2018) Snaptron: querying splicing patterns across tens of thousands of RNA-seq samples. <i>Bioinformatics</i> 34:114-116. <a href="https://doi.org/10.1093/bioinformatics/btx547">doi:10.1093/bioinformatics/btx547</a> <span class="ru">— Snaptron junctions (srav3h arcs; tcgav2 / gtexv2 per-sample splicing)</span></li>
+<li>Wilks et al. (2021) recount3: summaries and queries for large-scale RNA-seq expression and splicing. <i>Genome Biol</i> 22:323. <a href="https://doi.org/10.1186/s13059-021-02533-6">doi:10.1186/s13059-021-02533-6</a> <span class="ru">— recount3 coverage bigWigs and QC (tissue panel, map rows)</span></li>
+<li>The Cancer Genome Atlas Research Network et al. (2013) The Cancer Genome Atlas Pan-Cancer analysis project. <i>Nat Genet</i> 45:1113-1120. <a href="https://doi.org/10.1038/ng.2764">doi:10.1038/ng.2764</a> <span class="ru">— TCGA RNA-seq (via recount3 / Snaptron)</span></li>
+<li>The GTEx Consortium et al. (2020) The GTEx Consortium atlas of genetic regulatory effects across human tissues. <i>Science</i> 369:1318-1330. <a href="https://doi.org/10.1126/science.aaz1776">doi:10.1126/science.aaz1776</a> <span class="ru">— GTEx RNA-seq (via recount3 / Snaptron)</span></li>
+<li>Ghandi et al. (2019) Next-generation characterization of the Cancer Cell Line Encyclopedia. <i>Nature</i> 569:503-508. <a href="https://doi.org/10.1038/s41586-019-1186-3">doi:10.1038/s41586-019-1186-3</a> <span class="ru">— CCLE RNA-seq (Telescope, 31-mer and recount3 readouts)</span></li>
+<li>The ENCODE Project Consortium et al. (2020) Expanded encyclopaedias of DNA elements in the human and mouse genomes. <i>Nature</i> 583:699-710. <a href="https://doi.org/10.1038/s41586-020-2493-4">doi:10.1038/s41586-020-2493-4</a> <span class="ru">— ENCODE stranded total RNA-seq (strand orientation)</span></li>
+<li>Luo et al. (2020) New developments on the Encyclopedia of DNA Elements (ENCODE) data portal. <i>Nucleic Acids Res</i> 48:D882-D889. <a href="https://doi.org/10.1093/nar/gkz1062">doi:10.1093/nar/gkz1062</a> <span class="ru">— ENCODE data portal</span></li>
+<li>Chikhi et al. (2024) Logan: Planetary-Scale Genome Assembly Surveys Life’s Diversity. <i>bioRxiv (preprint)</i>. <a href="https://doi.org/10.1101/2024.07.30.605881">doi:10.1101/2024.07.30.605881</a> <span class="ru">— Logan unitigs (CCLE 31-mer readout)</span></li>
+<li>Hernandez-Courbevoie et al. (2025) REINDEER2: practical abundance index at scale. <i>bioRxiv (preprint)</i>. <a href="https://doi.org/10.1101/2025.06.16.659990">doi:10.1101/2025.06.16.659990</a> <span class="ru">— REINDEER2 k-mer abundance index (CCLE 31-mer readout)</span></li>
+<li>Riquier et al. (2021) Kmerator Suite: design of specific k-mer signatures and automatic metadata discovery in large RNA-seq datasets. <i>NAR Genom Bioinform</i> 3:lqab058. <a href="https://doi.org/10.1093/nargab/lqab058">doi:10.1093/nargab/lqab058</a> <span class="ru">— Kmerator locus-specific 31-mer probes</span></li>
+<li>Marçais &amp; Kingsford (2011) A fast, lock-free approach for efficient parallel counting of occurrences of k-mers. <i>Bioinformatics</i> 27:764-770. <a href="https://doi.org/10.1093/bioinformatics/btr011">doi:10.1093/bioinformatics/btr011</a> <span class="ru">— Jellyfish k-mer counting (probe design)</span></li>
+</ul>
+</details></footer>
+<!-- /REFS -->
 
 <script>
-/*buildstamp*/const BUILD="f1dbaa5a6e8e";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
+/*buildstamp*/const BUILD="9ab8e7176b9f";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
 const MAXSHOW=20, IDENT_LABEL={combined_id:"combined_id (positional)",versioned_id:"versioned_id (with version)",
   telescope_id:"telescope_id",hervd_id:"HERVd ID",ervmap_id:"ERVmap ID",ervmap_alt_name:"ERVmap alt name",
   subramanian_id:"Subramanian 2011 locus (HML-2)",hml2_k_number:"HML-2 K-number (Subramanian)",
-  hml2_k_designation:"HML-2 K-designation (Subramanian)",hgnc_ervk_symbol:"HGNC ERVK symbol",
+  hml2_k_designation:"HML-2 K-designation (Subramanian)",hgnc_ervk_symbol:"HGNC ERVK symbol",hgnc_erv_symbol:"HGNC ERV gene (GENCODE v50 overlap)",hervarium_id:"HERVarium internal element",hervarium_ltr_id:"HERVarium LTR",hervominer_id:"HERVOminer locus",
   missillac_id:"Missillac ID (ERV Navigator)",rbrt_id:"RBRT ID (ERV Navigator legacy)"};
 const NAV_URL="https://ervnavigator.fredhutch.org/locus/";
 const CLASS_LABEL={dfam_int_model:"Dfam internal model",dfam_accession:"Dfam accession",repbase_name:"RepBase name"};
@@ -703,8 +775,20 @@ async function getLocus(uid){
       "). Non-finite values such as NaN are not legal JSON — rebuild with allow_nan=False."); }
     shardCache.set(b,obj);
   }
-  return shardCache.get(b)[uid];
+  const rec=shardCache.get(b)[uid];
+  // 100-bp coverage for every tissue group (D46): one gzip'd uint8 file per shard bucket
+  if(rec&&rec.cv&&!rec.cov){
+    if(!covCache.has(b)){
+      const r=await fetch("data/cov/"+b+".bin.gz");
+      if(!r.ok) throw new Error("coverage "+b+" fetch failed: HTTP "+r.status);
+      covCache.set(b,new Uint8Array(await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer()));
+    }
+    const G=((LOOKUP.tissue||{}).groups||[]).length;
+    rec.cov=covCache.get(b).subarray(rec.cv[0],rec.cv[0]+G*rec.cv[1]);
+  }
+  return rec;
 }
+const covCache=new Map();
 if(typeof window!=="undefined"&&window.addEventListener){
   window.addEventListener("unhandledrejection",e=>showError("Async operation",e.reason||e));
   window.addEventListener("error",e=>showError("Script error",e.error||e.message));
@@ -769,8 +853,8 @@ function drawList(){
     }catch(err){ showError("Loading locus",err); }});
 }
 </script>
-<script src="detail.js?v=f1dbaa5a6e8e"></script>
-<script src="tx.js?v=f1dbaa5a6e8e"></script>
+<script src="detail.js?v=9ab8e7176b9f"></script>
+<script src="tx.js?v=9ab8e7176b9f"></script>
 <div id="tip"></div>
 <script>
 /* Hover cards: any element with data-tip (HTML, pre-escaped).
