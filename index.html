@@ -42,7 +42,7 @@
  .idline .uid{font-family:ui-monospace,Menlo,monospace;color:var(--mut);font-size:13px}
  table{border-collapse:collapse;width:100%;font-size:13px}
  th,td{text-align:left;padding:4px 9px 4px 0;vertical-align:top;border-bottom:1px solid #f2f2f6}
- th{font-weight:600;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+ th{font-weight:600;color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.03em}
  tr:last-child td{border-bottom:0}
  .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;font-size:13px}
  .kv dt{color:var(--mut)}
@@ -54,17 +54,55 @@
  .ucsc{display:inline-block;padding:3px 9px;border:1px solid var(--acc);border-radius:4px;
    font-size:12px;text-decoration:none;margin-right:7px}
  .ucsc:hover{background:#eef4fa}
- .lg{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin-top:6px}
- .covctl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--mut);margin:0 0 6px 110px}
+ .lg{display:flex;gap:5px 14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin-top:6px}
+ .covctl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--mut);margin:0 0 6px 128px}
  .covctl .k{margin-right:2px}
- .covbtn{font:inherit;font-size:11px;padding:2px 9px;border:1px solid var(--line);background:#fff;border-radius:4px;cursor:pointer;color:var(--ink)}
+ .covbtn{font:inherit;font-size:12px;padding:2px 9px;border:1px solid var(--line);background:#fff;border-radius:4px;cursor:pointer;color:var(--ink)}
  .covbtn.on{background:var(--ink);color:#fff;border-color:var(--ink)}
  .covchip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:10px;padding:1px 7px;background:#fff;color:var(--ink)}
  .covchip i{display:inline-block;width:10px;height:3px}
  .covchip a{color:var(--mut);text-decoration:none}
- .covctl select{font:inherit;font-size:11px;padding:1px 4px}
+ .covctl select{font:inherit;font-size:12px;padding:1px 4px}
  .lg i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:4px;vertical-align:-1px}
- .note{font-size:12px;color:var(--mut);font-style:italic;margin-top:6px}
+ .note{font-size:12.5px;line-height:1.5;color:#5c5c68;margin-top:6px}
+ .note i{font-style:italic}
+ details.how{margin-top:6px;font-size:12.5px;color:#5c5c68}
+ details.how>summary{cursor:pointer;color:var(--acc);width:max-content}
+ details.how .note{margin-top:4px}
+ .locnav{position:sticky;top:0;z-index:30;display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:var(--bg);
+   border-bottom:1px solid var(--line);padding:7px 0;margin:-8px 0 12px;font-size:13px}
+ .locnav:empty{display:none}
+ .locnav b{font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-right:10px}
+ .locnav a{padding:3px 9px;border-radius:12px;color:var(--mut);text-decoration:none;cursor:pointer;white-space:nowrap}
+ .locnav a:hover{background:#eef4fa;color:var(--ink)}
+ .locnav a.sp{margin-left:auto;color:var(--acc)}
+ .panel{scroll-margin-top:48px}
+ .idk{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-right:-8px}
+ .idline .uid.vid{color:var(--ink);font-weight:600}
+ button.cpy{font:inherit;font-size:11px;padding:0 6px;line-height:17px;margin-left:-8px;border:1px solid var(--line);border-radius:3px;
+   background:var(--bg);color:var(--mut);cursor:pointer}
+ button.cpy:hover{color:var(--ink);border-color:var(--mut)}
+ .posline{font-size:13px;color:var(--mut);margin:1px 0 6px}
+ .posline .mono{color:var(--ink);font-size:12.5px}
+ .posline .neigh{float:right;font-size:12.5px} .posline .neigh a{font-family:ui-monospace,Menlo,monospace}
+ h2 .dlbtns a.ucsc{font-size:11px;padding:1px 8px;margin:0 0 0 5px;font-weight:400}
+ .glance{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
+ .chip{border:1px solid var(--line);border-radius:6px;padding:4px 10px 5px;font-size:13px;line-height:1.35;background:#fafafc;
+   color:var(--ink);text-decoration:none;cursor:pointer;max-width:100%}
+ .chip:hover{border-color:var(--acc)}
+ .chip .k{display:block;font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+ .chip .m{color:var(--mut);font-size:12px;margin-left:4px}
+ .chip.warn{background:#FFF4E5;border-color:#e0b787}
+ .chip.warn .m{color:#8a4b12}
+ .chip.find{background:#E8F1FA;border-color:#7fa7cf} .chip.find .m{color:#1f4e79}
+ .escand{color:#0072B2;font-weight:600}
+ .tsfind{border-left:3px solid #0072B2;background:#F2F7FC;padding:6px 9px;margin:4px 0 8px;font-size:12.5px}
+ .panel.fold>h2{cursor:pointer}
+ .panel.fold>h2::before{content:"\25BE\00a0"}
+ .panel.fold.closed>h2::before{content:"\25B8\00a0"}
+ .panel.fold.closed>h2{margin-bottom:0}
+ .panel.fold.closed>:not(h2){display:none}
+ .panel.fold>h2:hover{color:var(--ink)}
  /* A note that reports a discrepancy rather than context -- must not read as
     ordinary small print. */
  .note.warn{color:#8a4b12;font-style:normal;background:#fdf5e8;border-left:3px solid #d99a3e;padding:6px 8px;border-radius:3px}
@@ -116,6 +154,8 @@
  .acols .ai{break-inside:avoid;display:grid;grid-template-columns:150px 1fr;gap:0 10px;
    padding:3px 0;border-bottom:1px solid #f0f0f4;font-size:13px}
  .acols .ai>span:first-child{color:var(--mut)}
+ .acols .ai>span{min-width:0;overflow-wrap:anywhere}
+ .ikey svg{display:inline-block;vertical-align:-1px}
  .absent{font-size:13px;color:var(--mut)}
  .absent b{font-weight:500;color:var(--ink)}
  .f5row{font-size:12.5px;margin-top:8px}
@@ -125,6 +165,7 @@
  button.ucsc:hover{background:#eef4fa}
  h2 .dlbtns{float:right;text-transform:none;letter-spacing:0}
  h2 .dlbtns button.ucsc{font-size:11px;padding:1px 8px;margin-left:5px}
+ h2 .dlbtns button.dlt{border-style:dashed}
  #fastanote:empty{display:none}
  #gfx .jx .hit{fill:none;stroke:transparent;stroke-width:9;pointer-events:stroke}
  #gfx .jx .vis{pointer-events:none;transition:opacity .08s}
@@ -134,8 +175,7 @@
  .jxkey{display:inline-flex;align-items:center;gap:6px}
  .jxkey svg{vertical-align:middle}
  .ccgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 28px}
- .tsall{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px}
- @media (max-width:1000px){.tsall{grid-template-columns:1fr}}
+ .tsall{display:block}
  details.tsja{margin:8px 0 4px;font-size:12.5px} details.tsja summary{cursor:pointer}
  table.tsjat td{vertical-align:top;font-variant-numeric:tabular-nums}
  .tsflag{background:#FFF4E5;border-left:3px solid var(--cat5);padding:7px 10px;margin:4px 0 10px;font-size:12.5px;border-radius:3px}
@@ -151,6 +191,16 @@
  .tabs a:hover{color:var(--ink)}
  .tabs a.on{color:var(--acc);border-bottom-color:var(--acc);font-weight:600}
  body.mode-batch .searchbar{display:none}
+ body.mode-browse main{max-width:1680px}
+ .bfil{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:flex-end;margin:4px 0 10px}
+ .bfil label{display:flex;flex-direction:column;gap:2px;font-size:11.5px;color:var(--mut)}
+ .bfil select,.bfil input[type=text],.bfil input[type=number]{font-size:13px;padding:4px 7px;min-width:0}
+ .bfil select{max-width:220px} .bfil input[type=number]{width:76px} .bfil input[type=text]{width:170px}
+ .bfil .chk{flex-direction:row;align-items:center;gap:5px;font-size:13px;color:var(--ink);padding-bottom:5px}
+ table.bt{font-size:13px} table.bt th{cursor:pointer;white-space:nowrap;user-select:none} table.bt th:hover{color:var(--ink)}
+ table.bt th.srt{color:var(--acc)} table.bt td{white-space:nowrap} table.bt td.num{text-align:right;font-variant-numeric:tabular-nums}
+ table.bt th.num{text-align:right} table.bt .cx2,table.bt .cx4{color:#8a4b12}
+ table.bt .mut{color:var(--mut)}
  #bin{width:100%;min-height:150px;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;padding:8px;
    border:1px solid var(--line);border-radius:5px;box-sizing:border-box}
  .bctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
@@ -170,7 +220,7 @@
 <header>
   <h1>HERV catalog browser <span id="sub">loading index…</span></h1>
   <nav class="tabs" id="tabs" aria-label="view">
-    <a href="#" data-tab="locus" class="on">Locus search</a><a href="#batch" data-tab="batch">Batch translate</a>
+    <a href="#" data-tab="locus" class="on">Locus search</a><a href="#browse" data-tab="browse">Browse</a><a href="#batch" data-tab="batch">Batch translate</a>
   </nav>
   <div class="searchbar">
     <select id="kspace"></select>
@@ -237,7 +287,7 @@
 <!-- /REFS -->
 
 <script>
-/*buildstamp*/const BUILD="9ab8e7176b9f";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
+/*buildstamp*/const BUILD="d6817592f00b";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
 const MAXSHOW=20, IDENT_LABEL={combined_id:"combined_id (positional)",versioned_id:"versioned_id (with version)",
   telescope_id:"telescope_id",hervd_id:"HERVd ID",ervmap_id:"ERVmap ID",ervmap_alt_name:"ERVmap alt name",
   subramanian_id:"Subramanian 2011 locus (HML-2)",hml2_k_number:"HML-2 K-number (Subramanian)",
@@ -267,12 +317,34 @@ const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",
 const fmt=n=>n==null||n===""?"—":(typeof n==="number"?n.toLocaleString():esc(n));
 const bp=n=>n==null?"—":Number(n).toLocaleString()+" bp";
 
+/* Layout 2 index: rebuild what build_dashboard.py no longer ships because it is
+   derivable (mirrored by expand_index there). keys[i] is nrm() of posting list i's
+   strings; ckeys / cmap group the keys by their HERV/ERV-prefix-collapsed form;
+   uids may be a rule; classifier lists are uid indices; uid -> combined_id / group
+   are listmeta columns. Idempotent, and a layout-1 index passes through unchanged. */
+function expandIndex(I){
+  const F=I.fuzzy;
+  if(F.uids&&!Array.isArray(F.uids)){ const u=F.uids, a=new Array(u.n);
+    for(let i=0;i<u.n;i++) a[i]=u.prefix+String(u.start+i).padStart(u.width,"0"); F.uids=a; }
+  if(!F.keys){
+    F.keys=F.post.map(pl=>nrm(pl[0][2]));
+    const coll=new Map();
+    F.keys.forEach((k,i)=>{ const c=k.replace(/^(HERV|ERV)/,""); const l=coll.get(c); if(l) l.push(i); else coll.set(c,[i]); });
+    F.ckeys=[...coll.keys()].sort(); F.cmap=F.ckeys.map(c=>coll.get(c));
+  }
+  for(const t of Object.keys(I.classifier||{})){ const m=I.classifier[t];
+    for(const k of Object.keys(m)) if(m[k].length&&typeof m[k][0]==="number") m[k]=m[k].map(i=>F.uids[i]); }
+  const LMr=(I.listmeta||{}).rows, LMg=(I.listmeta||{}).groups;
+  if(!I.uid2cid&&LMr){ I.uid2cid={}; F.uids.forEach((u,i)=>{I.uid2cid[u]=LMr[i][0];}); }
+  if(!I.uid2group&&LMr){ I.uid2group={}; F.uids.forEach((u,i)=>{I.uid2group[u]=LMr[i][1]>=0?LMg[LMr[i][1]]:null;}); }
+  return I;
+}
 async function boot(){
   try{ await boot_(); }catch(e){ showError("Startup",e); }
 }
 async function boot_(){
   const r=await fetch("data/search_index.json.gz");
-  IDX=JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text());
+  IDX=expandIndex(JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text()));
   const sm=await (await fetch("data/shard_meta.json")).json(); NB=sm.n_buckets;
   // Optional TU layer. A 404 here is the normal public-bundle case, not an error,
   // so it is swallowed deliberately rather than surfaced through showError().
@@ -344,7 +416,8 @@ async function boot_(){
 let LASTUID=null, EMPTYVIEW=null;
 function setMode(m){
   if(!document.body||!document.body.classList) return;
-  document.body.classList.toggle("mode-batch",m==="batch");
+  document.body.classList.toggle("mode-batch",m!=="locus");      // hides the search bar outside the locus view
+  document.body.classList.toggle("mode-browse",m==="browse");    // the browse table uses the full window width
   document.querySelectorAll("#tabs a").forEach(a=>a.classList.toggle("on",a.dataset.tab===m));
   const lt=document.querySelector('#tabs a[data-tab="locus"]'); if(lt) lt.setAttribute("href","#"+(LASTUID||""));
 }
@@ -352,10 +425,14 @@ async function route(){
   const h=decodeURIComponent(location.hash.slice(1));
   if(EMPTYVIEW==null) EMPTYVIEW=$("view").innerHTML;
   if(h==="batch"){ setMode("batch"); return renderBatch(); }
+  if(h==="browse"||h.indexOf("browse?")===0){ setMode("browse");
+    try{ return await renderBrowse(h); }catch(e){ return showError("Loading the browse table",e); } }
   setMode("locus");
   if(!h&&$("bin")){ $("view").innerHTML=EMPTYVIEW; $("q").focus(); return; }
-  if(h&&UPOS&&UPOS.has(h)){
-    try{ const d=await getLocus(h); if(d) render(d,{k:h,kind:"i",type:"uid",uids:[h],cur:1}); }
+  // #<locus_uid> or #<locus_uid>/<section>: the section is opened by decorate() in detail.js
+  const hu=h.split("/")[0], hs=h.split("/")[1]||null;
+  if(hu&&UPOS&&UPOS.has(hu)){
+    try{ const d=await getLocus(hu); if(d){ if(typeof PENDING_SEC!=="undefined") PENDING_SEC=hs; render(d,{k:hu,kind:"i",type:"uid",uids:[hu],cur:1}); } }
     catch(e){ showError("Loading locus",e); }
   }
 }
@@ -439,6 +516,171 @@ function renderBatch(){
       (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v):Promise.reject()).then(
         ()=>{b.textContent="copied";setTimeout(()=>b.textContent="copy TSV",1200);},()=>{b.textContent="copy failed \u2014 use download";}); }; }
 }
+/* ---------------------------------------------------------------- browse view
+   The whole catalog as one filterable, sortable table. Rows come from listmeta (name,
+   group, position) and data/browse.json.gz (one summary row per locus, written by
+   build_dashboard.build_browse with the same rules as the locus page's at-a-glance
+   strip), both aligned with FZ.uids, so nothing is fetched per locus. The filter state
+   lives in the address (#browse?g=HML2&orf=1), so a filtered view is a shareable link. */
+let BROWSE=null, BST=null, BCHR=null;
+const BDEF={q:"",g:"",c:"",ctx:"",st:"",orf:0,hvo:0,dom:0,spl:0,esc:0,own:0,map:"",det:"",ccle:"",sort:"pos",dir:1};
+const BSPL={both_sense:"sense, both ends",one_sense:"sense, one end",both_anti:"antisense, both ends",one_anti:"antisense, one end",
+  intronic:"spanning only",none:"none",not_assessable:"not assessable"};
+async function loadBrowse(){
+  if(BROWSE) return BROWSE;
+  await loadLookup();
+  const r=await fetch("data/browse.json.gz");
+  if(!r.ok) throw new Error("browse.json.gz fetch failed: HTTP "+r.status);
+  BROWSE=JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text());
+  // chromosome rank for position order: chr1..22, X, Y, M, then the other contigs by name
+  const rk=c=>{ const m=/^chr(\d+|X|Y|M)$/.exec(c); return m?(isNaN(+m[1])?{X:23,Y:24,M:25}[m[1]]:+m[1]):1000; };
+  BCHR=LM.chroms.map((c,ix)=>[rk(c),c,ix]).sort((a,b)=>a[0]-b[0]||(a[1]<b[1]?-1:1)).reduce((o,e,n)=>(o[e[2]]=n,o),{});
+  return BROWSE;
+}
+function browseParse(h){
+  const s=Object.assign({},BDEF), q=(h||"").split("?")[1]||"";
+  q.split("&").filter(Boolean).forEach(kv=>{ const k=kv.split("=")[0], v=decodeURIComponent(kv.slice(k.length+1));
+    if(k in BDEF) s[k]=typeof BDEF[k]==="number"?(+v||0):v; });
+  s.page=0; return s;
+}
+function browseHash(s){
+  const p=[]; for(const k of Object.keys(BDEF)) if(String(s[k])!==String(BDEF[k])) p.push(k+"="+encodeURIComponent(s[k]));
+  return "#browse"+(p.length?"?"+p.join("&"):"");
+}
+/* Columns: [key, header, title, value(i) for sorting and the TSV, cell html(i), numeric]. i is the uid index. */
+function browseCols(){
+  const B=BROWSE, R=B.rows, L=LM.rows, c=B.cols.reduce((o,k,n)=>(o[k]=n,o),{});
+  const nz=v=>v<0?null:v, pct=v=>v<0?'<span class="mut">\u2014</span>':v+"%", num=v=>v<0?'<span class="mut">\u2014</span>':v.toLocaleString();
+  return [
+   ["name","locus","combined_id; opens the locus page",i=>L[i][0],i=>'<a class="mono" href="#'+FZ.uids[i]+'">'+esc(L[i][0])+"</a>"],
+   ["group","group","HERV group",i=>L[i][1]>=0?LM.groups[L[i][1]]:"",i=>esc(L[i][1]>=0?LM.groups[L[i][1]]:"\u2014")],
+   ["pos","position (hg38)","hg38 position, 1-based; loci without an hg38 coordinate sort last",
+     i=>L[i][3]>=0?BCHR[L[i][3]]*1e10+L[i][4]:9e15,
+     i=>L[i][3]>=0&&L[i][4]>=0?'<span class="mono">'+esc(LM.chroms[L[i][3]])+":"+(L[i][4]+1).toLocaleString()+"</span>":'<span class="mut">T2T only</span>'],
+   ["len","length","length in bp (hg38, else T2T)",i=>nz(R[i][c.length_bp]),i=>num(R[i][c.length_bp]),1],
+   ["struct","structure","LTR (L) / internal (I) arrangement",i=>R[i][c.structure]>=0?B.structure[R[i][c.structure]]:"",i=>esc(R[i][c.structure]>=0?B.structure[R[i][c.structure]]:"\u2014")],
+   ["ctx","genomic context","position relative to GENCODE v50 transcripts; intronic and host-exonic loci are detected through their host",
+     i=>B.context[R[i][c.context]]+(R[i][c.context_gene]?" ("+R[i][c.context_gene]+")":""),
+     i=>R[i][c.context]?'<span class="cx'+R[i][c.context]+'">'+esc(B.context[R[i][c.context]])+"</span>"+(R[i][c.context_gene]?' <span class="mut">'+esc(R[i][c.context_gene])+"</span>":""):'<span class="mut">\u2014</span>'],
+   ["orf","gEVE ORFs","number of gEVE ORFs",i=>R[i][c.n_geve_orfs],i=>R[i][c.n_geve_orfs]||'<span class="mut">0</span>',1],
+   ["hvo","ORFs \u2265 81 aa","number of HERVOminer ORFs of at least 81 aa",i=>R[i][c.n_hervominer_orfs],i=>R[i][c.n_hervominer_orfs]||'<span class="mut">0</span>',1],
+   ["dom","domains","number of HERVarium conserved domains",i=>R[i][c.n_domains],i=>R[i][c.n_domains]||'<span class="mut">0</span>',1],
+   ["map","unique","share of the locus with unique 100-mers (Umap k100)",i=>nz(R[i][c.pct_mappable]),i=>pct(R[i][c.pct_mappable]),1],
+   ["spl","splicing","Snaptron splice tier: the strongest own-junction evidence",
+     i=>R[i][c.splice_tier]>=0?BSPL[B.splice_tier[R[i][c.splice_tier]]]||B.splice_tier[R[i][c.splice_tier]]:"",
+     i=>R[i][c.splice_tier]>=0?esc(BSPL[B.splice_tier[R[i][c.splice_tier]]]||B.splice_tier[R[i][c.splice_tier]]):'<span class="mut">\u2014</span>'],
+   ["det","detected","tissue groups (of "+B.n_groups+" with \u2265 "+B.min_group+" samples) in which at least half the samples have the body detected (coverage per base > 1; unstranded, includes host transcription)",
+     i=>nz(R[i][c.n_groups_detected]),i=>num(R[i][c.n_groups_detected]),1],
+   ["sps","own splicing","tissue groups (of "+B.n_groups_jx+" with junction data) in which at least half the samples have own sense split reads",
+     i=>nz(R[i][c.n_groups_spliced]),i=>num(R[i][c.n_groups_spliced]),1],
+   ["ccle","CCLE \u2265 1 TPM","share of "+B.n_lines.toLocaleString()+" CCLE lines at \u2265 1 TPM (Telescope loci only)",i=>nz(R[i][c.pct_ccle_telescope]),i=>pct(R[i][c.pct_ccle_telescope]),1],
+   ["kmer","CCLE 31-mer","share of "+B.n_lines_kmer.toLocaleString()+" CCLE lines with the body detected by locus-unique 31-mers",i=>nz(R[i][c.pct_ccle_kmer]),i=>pct(R[i][c.pct_ccle_kmer]),1],
+   ["tn","tumour > normal","TCGA projects (matched pairs) in which the locus is called higher in tumour",i=>nz(R[i][c.n_tn_higher]),i=>num(R[i][c.n_tn_higher]),1],
+   ["strand","own strand","stranded pilot (ENCODE tissue + Blueprint blood): \u2605 element-strand candidate (intronic, host antisense, own-strand signal > 4\u00d7 its flanks); \u2022 own-strand expressed in \u2265 2 stranded samples",
+     i=>c.strand_class==null?null:R[i][c.strand_class],i=>c.strand_class==null?"":R[i][c.strand_class]===2?'<span class="escand" title="element-strand candidate">\u2605</span>':R[i][c.strand_class]===1?"\u2022":"",1]];
+}
+function browseRows(){
+  const s=BST, B=BROWSE, R=B.rows, L=LM.rows, c=B.cols.reduce((o,k,n)=>(o[k]=n,o),{});
+  const q=s.q.trim().toUpperCase(), gi=s.g?LM.groups.indexOf(s.g):-2, ci=s.c?LM.chroms.indexOf(s.c):-2;
+  const sti=s.st?B.structure.indexOf(s.st):-2, mm=s.map===""?-1:+s.map, dm=s.det===""?-1:+s.det, cm=s.ccle===""?-1:+s.ccle;
+  const senseT=new Set(["both_sense","one_sense"].map(t=>B.splice_tier.indexOf(t)).filter(x=>x>=0));
+  const out=[];
+  for(let i=0;i<L.length;i++){ const r=R[i], l=L[i];
+    if(gi!==-2&&l[1]!==gi) continue;
+    if(ci!==-2&&l[3]!==ci) continue;
+    if(s.ctx!==""&&r[c.context]!==+s.ctx) continue;
+    if(sti!==-2&&r[c.structure]!==sti) continue;
+    if(s.orf&&!r[c.n_geve_orfs]) continue;
+    if(s.hvo&&!r[c.n_hervominer_orfs]) continue;
+    if(s.dom&&!r[c.n_domains]) continue;
+    if(s.spl&&!senseT.has(r[c.splice_tier])) continue;
+    if(s.esc&&r[c.strand_class]!==2) continue;
+    if(s.own&&!(r[c.strand_class]>=1)) continue;
+    if(mm>=0&&r[c.pct_mappable]<mm) continue;
+    if(dm>=0&&r[c.n_groups_detected]<dm) continue;
+    if(cm>=0&&r[c.pct_ccle_telescope]<cm) continue;
+    if(q&&!l[0].toUpperCase().includes(q)) continue;
+    out.push(i); }
+  const col=browseCols().find(x=>x[0]===s.sort)||browseCols()[2], v=col[3], dir=s.dir<0?-1:1;
+  const key=new Map(); out.forEach(i=>key.set(i,v(i)));
+  out.sort((a,b)=>{ const x=key.get(a), y=key.get(b);
+    if(x==null||x==="") return (y==null||y==="")?a-b:1;          // empty values last in either direction
+    if(y==null||y==="") return -1;
+    return (x<y?-1:x>y?1:0)*dir||a-b; });
+  return out;
+}
+function browseTSV(rows){
+  const B=BROWSE, R=B.rows, L=LM.rows, c=B.cols.reduce((o,k,n)=>(o[k]=n,o),{}), nz=v=>v<0?"":v;
+  const head=["locus_uid","combined_id","versioned_id","group","hg38_chrom","hg38_start_0based","hg38_end","length_bp","strand","structure","category",
+    "genomic_context","context_gene","n_geve_orfs","n_hervominer_orfs_ge81aa","n_hervarium_domains","pct_unique_100mers_umap","snaptron_splice_tier",
+    "n_groups_detected_of_"+B.n_groups,"n_groups_own_spliced_of_"+B.n_groups_jx,"pct_ccle_lines_ge1tpm_telescope","pct_ccle_lines_body_detected_31mer",
+    "n_tcga_projects_higher_in_tumour","n_tcga_projects_lower_in_tumour","stranded_pilot_class"];
+  const out=["# HERV catalog v2, dashboard v1.0 \u2014 browse table, "+rows.length.toLocaleString("en-US")+" of "+L.length.toLocaleString("en-US")+" loci"+(browseHash(BST)!=="#browse"?"; filter "+browseHash(BST):""),
+    "# n_groups_detected: tissue groups of >= "+B.min_group+" samples in which at least half the samples have the body detected (recount3 coverage per base > 1 over unique segments; unstranded, so intronic and host-exonic loci are detected through their host transcript). n_groups_own_spliced: of the groups with junction data, those in which at least half the samples have own sense split reads.",
+    "# hg38_start is 0-based, hg38_end exclusive. Empty = the layer has no record for the locus.",head.join("\t")];
+  for(const i of rows){ const r=R[i], l=L[i];
+    out.push([FZ.uids[i],l[0],verOf(i),l[1]>=0?LM.groups[l[1]]:"",l[3]>=0?LM.chroms[l[3]]:"",nz(l[4]),nz(l[5]),nz(r[c.length_bp]),["","+","-"][r[c.strand]],
+      r[c.structure]>=0?B.structure[r[c.structure]]:"",r[c.category]>=0?B.category[r[c.category]]:"",B.context[r[c.context]],r[c.context_gene],
+      r[c.n_geve_orfs],r[c.n_hervominer_orfs],r[c.n_domains],nz(r[c.pct_mappable]),r[c.splice_tier]>=0?B.splice_tier[r[c.splice_tier]]:"",
+      nz(r[c.n_groups_detected]),nz(r[c.n_groups_spliced]),nz(r[c.pct_ccle_telescope]),nz(r[c.pct_ccle_kmer]),nz(r[c.n_tn_higher]),nz(r[c.n_tn_lower]),c.strand_class==null?"":["","own_strand","element_strand_candidate"][r[c.strand_class]]||""]
+      .map(x=>String(x==null?"":x).replace(/[\t\n]/g," ")).join("\t")); }
+  return out.join("\n")+"\n";
+}
+async function renderBrowse(h){
+  await loadBrowse();
+  BST=browseParse(h);
+  const B=BROWSE, s=BST, cnt=a=>a.reduce((o,x)=>(o[x]=(o[x]||0)+1,o),{});
+  const gN=cnt(LM.rows.map(r=>r[1])), sN=cnt(B.rows.map(r=>r[2])), xN=cnt(B.rows.map(r=>r[4]));
+  const opt=(v,t,cur)=>'<option value="'+esc(v)+'"'+(String(v)===String(cur)?" selected":"")+">"+esc(t)+"</option>";
+  const chk=(k,t)=>'<label class="chk"><input type="checkbox" data-b="'+k+'"'+(s[k]?" checked":"")+"> "+t+"</label>";
+  const chrs=LM.chroms.map((c,ix)=>[BCHR[ix],c]).filter(x=>x[1]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
+  $("view").innerHTML='<div class="panel"><h2>Browse the catalog</h2>'+
+    '<div class="note" style="margin:0 0 8px">Every locus, one row each. Filter, click a column header to sort, open a locus by its name. '+
+    "<b>Detected</b> counts are unstranded and include host transcription: at intronic and host-exonic loci (context shown in brown) "+
+    "they follow the host gene, so read them with <b>own splicing</b> and the locus page\u2019s context note.</div>"+
+    '<div class="bfil">'+
+    '<label>name contains<input type="text" data-b="q" value="'+esc(s.q)+'" placeholder="e.g. 1q22" spellcheck="false" autocomplete="off"></label>'+
+    '<label>group<select data-b="g">'+opt("","all "+LM.groups.length+" groups",s.g)+LM.groups.map((g,ix)=>opt(g,g+" ("+(gN[ix]||0).toLocaleString()+")",s.g)).join("")+"</select></label>"+
+    '<label>chromosome (hg38)<select data-b="c">'+opt("","all",s.c)+chrs.map(c=>opt(c,c,s.c)).join("")+"</select></label>"+
+    '<label>genomic context<select data-b="ctx">'+opt("","any",s.ctx)+B.context.map((t,ix)=>ix?opt(ix,t+" ("+(xN[ix]||0).toLocaleString()+")",s.ctx):"").join("")+"</select></label>"+
+    '<label>structure<select data-b="st">'+opt("","any",s.st)+B.structure.map((t,ix)=>[t,sN[ix]||0]).sort((a,b)=>b[1]-a[1]).slice(0,40).map(x=>opt(x[0],x[0]+" ("+x[1].toLocaleString()+")",s.st)).join("")+"</select></label>"+
+    '<label title="share of the locus with unique 100-mers (Umap)">unique \u2265 %<input type="number" min="0" max="100" data-b="map" value="'+esc(s.map)+'"></label>'+
+    '<label title="tissue groups in which at least half the samples have the body detected">detected in \u2265 groups<input type="number" min="0" max="'+B.n_groups+'" data-b="det" value="'+esc(s.det)+'"></label>'+
+    '<label title="share of CCLE lines at 1 TPM or more (Telescope)">CCLE \u2265 1 TPM in \u2265 %<input type="number" min="0" max="100" data-b="ccle" value="'+esc(s.ccle)+'"></label>'+
+    chk("orf","gEVE ORF")+chk("hvo","ORF \u2265 81 aa")+chk("dom","conserved domain")+chk("spl","own sense junction")+chk("own","own-strand RNA (stranded)")+chk("esc","\u2605 element-strand candidate")+
+    '<button class="ucsc" id="breset" style="margin-bottom:3px">clear filters</button></div>'+
+    '<div class="bsum"><span id="bcount"></span> <button class="ucsc" id="btsv" title="download the filtered rows as a tab-separated file (written in your browser)">download TSV</button>'+
+    '<button class="ucsc" id="blink" title="copy a link to this filtered view">copy link</button></div>'+
+    '<div style="overflow-x:auto" id="btab"></div><div class="pager" id="bpg"></div></div>';
+  const upd=()=>{ document.querySelectorAll("#view [data-b]").forEach(e=>{ const k=e.getAttribute("data-b");
+      BST[k]=e.type==="checkbox"?(e.checked?1:0):e.value; }); BST.page=0; drawBrowse(); };
+  document.querySelectorAll("#view [data-b]").forEach(e=>{ e.addEventListener(e.tagName==="INPUT"&&e.type!=="checkbox"?"input":"change",upd); });
+  $("breset").onclick=()=>{ history.replaceState(null,"","#browse"); renderBrowse("browse"); };
+  $("btsv").onclick=()=>saveBlob(new Blob([browseTSV(browseRows())],{type:"text/tab-separated-values"}),"herv_browse.tsv");
+  $("blink").onclick=()=>{ const b=$("blink"), u=location.href.split("#")[0]+browseHash(BST);
+    (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(u):Promise.reject()).then(
+      ()=>{b.textContent="copied";setTimeout(()=>b.textContent="copy link",1200);},()=>{b.textContent="link is in the address bar";}); };
+  drawBrowse();
+}
+function drawBrowse(){
+  const s=BST, rows=browseRows(), cols=browseCols(), nPage=Math.max(1,Math.ceil(rows.length/PAGE));
+  if(s.page>=nPage) s.page=nPage-1;
+  const p=s.page||0, slice=rows.slice(p*PAGE,(p+1)*PAGE);
+  if(location.hash!==browseHash(s)) history.replaceState(null,"",browseHash(s));
+  $("bcount").innerHTML="<b>"+rows.length.toLocaleString()+"</b> of "+LM.rows.length.toLocaleString()+" loci";
+  $("btab").innerHTML=slice.length?'<table class="bt"><tr>'+cols.map(c=>'<th data-s="'+c[0]+'" title="'+esc(c[2])+'" class="'+(c[5]?"num":"")+(c[0]===s.sort?" srt":"")+'">'+
+      esc(c[1])+(c[0]===s.sort?(s.dir<0?" \u25BE":" \u25B4"):"")+"</th>").join("")+"</tr>"+
+    slice.map(i=>"<tr>"+cols.map(c=>"<td"+(c[5]?' class="num"':"")+">"+c[4](i)+"</td>").join("")+"</tr>").join("")+"</table>"
+    :'<div class="note">no locus matches these filters</div>';
+  document.querySelectorAll("#btab th[data-s]").forEach(th=>th.onclick=()=>{ const k=th.getAttribute("data-s");
+    if(s.sort===k) s.dir=-s.dir; else { s.sort=k; s.dir=browseCols().find(c=>c[0]===k)[5]?-1:1; } s.page=0; drawBrowse(); });
+  const lo=rows.length?p*PAGE+1:0, hi=Math.min((p+1)*PAGE,rows.length);
+  $("bpg").innerHTML=rows.length>PAGE?'<button id="bpp"'+(p===0?" disabled":"")+">\u2039 prev</button>"+
+    '<span class="note">'+lo.toLocaleString()+"\u2013"+hi.toLocaleString()+" of "+rows.length.toLocaleString()+"  (page "+(p+1)+" of "+nPage+")</span>"+
+    '<button id="bpn"'+(p>=nPage-1?" disabled":"")+">next \u203a</button>":"";
+  if($("bpp")) $("bpp").onclick=()=>{ s.page--; drawBrowse(); };
+  if($("bpn")) $("bpn").onclick=()=>{ s.page++; drawBrowse(); };
+}
 function hide(){$("results").classList.remove("on");curSel=-1;}
 
 /* Cross-keyspace search over the fuzzy postings.
@@ -493,8 +735,23 @@ function fuzzySearch(q,only,cap){
    uid and cannot ride the fuzzy postings above. Searched as a separate lane and
    rendered as outbound-only rows: a valid Missillac ID must never come back
    empty, but it must also not masquerade as a locus we annotate. */
+/* Layout 2 ships the unmapped ERV Navigator records columnar (build_dashboard.navigator_unmapped).
+   Rebuilt here on the first search that can reach them, not at start-up: rows as
+   [missillac_id, rbrt_id, cat_ix, lineage_id, chrom, start, end, url], plus the sorted
+   normalised keys and their postings. */
+function navIndex(){
+  const M=IDX.missillac;
+  if(!M||M.keys||!M.lin) return M;
+  const rows=new Array(M.n), by=new Map();
+  for(let i=0;i<M.n;i++){ const lin=M.lineages[M.lin[i]], id=lin+"-"+M.sfx[i], rb=M.rb[i]<0?(M.rbx||{})[i]:"RBRT"+M.rb[i];
+    rows[i]=[id,rb,M.cat[i],lin,M.ch[i]>=0?M.chroms[M.ch[i]]:null,M.st[i]>=0?M.st[i]:null,M.st[i]>=0?M.st[i]+M.ln[i]:null,
+      typeof navUrl==="function"?navUrl(id):NAV_URL+encodeURIComponent(id)];
+    for(const k of [nrm(id),nrm(rb)]){ const l=by.get(k); if(l){ if(l[l.length-1]!==i) l.push(i); } else by.set(k,[i]); } }
+  M.keys=[...by.keys()].sort(); M.post=M.keys.map(k=>by.get(k)); M.rows=rows;
+  return M;
+}
 function missillacSearch(q,only,cap){
-  const MI=IDX.missillac;
+  const MI=navIndex();
   if(!MI||!MI.keys||!MI.keys.length)return [];
   if(only!=null&&only!=="missillac_id"&&only!=="rbrt_id")return [];
   const n=nrm(q); if(!n)return [];
@@ -853,8 +1110,8 @@ function drawList(){
     }catch(err){ showError("Loading locus",err); }});
 }
 </script>
-<script src="detail.js?v=9ab8e7176b9f"></script>
-<script src="tx.js?v=9ab8e7176b9f"></script>
+<script src="detail.js?v=d6817592f00b"></script>
+<script src="tx.js?v=d6817592f00b"></script>
 <div id="tip"></div>
 <script>
 /* Hover cards: any element with data-tip (HTML, pre-escaped).

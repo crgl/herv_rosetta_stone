@@ -2,11 +2,15 @@
 const UCSC={hs1:"https://genome.ucsc.edu/cgi-bin/hgTracks?db=hs1&position=",
   hg38:"https://genome.ucsc.edu/cgi-bin/hgTracks?db=hg38&position=",
             t2t:"https://genome.ucsc.edu/cgi-bin/hgTracks?db=hs1&position="};
-/* Reverse the build's shard packing (build_dashboard.pack_repeats, layout 1) into
-   the row shapes the renderers use. Idempotent; needs LOOKUP loaded. */
+/* Reverse the build's shard packing (build_dashboard.pack_repeats and, from layout 2,
+   pack_record) into the row shapes the renderers use. Idempotent; needs LOOKUP loaded. */
+const ROW_FIELDS=["aliases","coord","segments","geve","domains","hervarium","hvorf","genes","dfam_best","hml2_detail","missillac"];
 function unpackLocus(d){
   if(!d||d._unpacked) return d;
   const LK=(typeof LOOKUP!=="undefined"&&LOOKUP)||{};
+  // layout 2 row tables: {k:[columns], r:[[values], ...]} -> [{column: value}, ...]
+  for(const f of ROW_FIELDS){ const v=d[f];
+    if(v&&!Array.isArray(v)&&v.k&&v.r) d[f]=v.r.map(r=>{const o={}; v.k.forEach((k,i)=>{o[k]=r[i];}); return o;}); }
   if(d.rep&&!d.repeats){
     const names=LK.repnames||[], rows=[];
     for(const asm of Object.keys(d.rep)){
@@ -50,12 +54,12 @@ function tuPanel(d){
   const rows=t.units.map(function(u){
     return '<tr><td><span class="cid" style="font-size:13px">'+esc(u.tu_id)+'</span></td>'+
       '<td>'+esc(u.group_call||"")+'<span class="note"> ('+esc(u.call_level||"")+')</span></td>'+
-      '<td>'+esc(u.verdict||"")+'</td>'+
-      '<td>'+esc(u.provenance||"")+'</td>'+
+      '<td>'+esc(hum(u.verdict)||"")+'</td>'+
+      '<td>'+esc(hum(u.provenance)||"")+'</td>'+
       '<td>'+esc(u.assemblies||"")+'</td>'+
       '<td>'+(u.internal_bp_hg38!=null?(+u.internal_bp_hg38).toLocaleString():
               (u.internal_bp_t2t!=null?(+u.internal_bp_t2t).toLocaleString()+' <span class="note">(t2t)</span>':""))+'</td>'+
-      '<td>'+esc(u.evidence||"")+'</td>'+
+      '<td>'+esc(hum(u.evidence)||"")+'</td>'+
       '<td>'+(u.is_chimeric?'<b>chimeric</b> ':'')+esc(u.member_groups||"")+'</td></tr>';
   }).join("");
   return '<div class="panel"><h2>Transcriptional unit (v0.2)</h2>'+
@@ -70,7 +74,7 @@ function tuPanel(d){
 function render(d,h){
   if(!d){$("view").innerHTML='<div class="empty">locus not found in bundle</div>';return;}
   d=unpackLocus(d);
-  if(d.uid&&typeof history!=="undefined"&&history.replaceState&&typeof location!=="undefined"&&location.hash!=="#"+d.uid)
+  if(d.uid&&typeof history!=="undefined"&&history.replaceState&&typeof location!=="undefined"&&location.hash!=="#"+d.uid&&location.hash.indexOf("#"+d.uid+"/")!==0)
     try{ history.replaceState(null,"","#"+d.uid); }catch(_){}
   if(typeof LASTUID!=="undefined"&&d.uid){ LASTUID=d.uid; if(typeof setMode==="function") setMode("locus"); }
   const hg=coordOf(d,"hg38"),t2=coordOf(d,"t2t"),g=d.group_info||{},st=d.structure||{},xg=d.crossgenome||{};
@@ -81,9 +85,14 @@ function render(d,h){
                t2?'<a class="ucsc" target="_blank" href="'+UCSC.t2t+t2.chrom+":"+(t2.start+1-1000)+"-"+(t2.end+1000)+'">UCSC T2T (hs1) ±1 kb</a>':""].join("");
   const dfb=(d.dfam_best||[])[0]||{};
   $("view").innerHTML=
+   '<nav class="locnav" id="locnav" aria-label="sections of this locus page"></nav>'+
    '<div class="panel"><div class="idline"><span class="cid">'+esc(d.combined_id)+'</span>'+
-     '<span class="uid">'+esc(d.uid)+'</span><span class="uid">'+esc(d.versioned_id)+'</span></div>'+
+     '<span class="idk">locus_uid</span><span class="uid">'+esc(d.uid)+'</span>'+
+     '<span class="idk">cite as</span><span class="uid vid">'+esc(d.versioned_id)+'</span>'+
+     '<button class="cpy" data-copy="'+esc(d.versioned_id)+'" title="copy the versioned_id">copy</button></div>'+
+     posLine(d,hg,t2)+
      '<div class="note">Cite the versioned_id. locus_uid is the immutable primary key; combined_id is positional and may re-letter.</div>'+
+     glance(d)+
      '<div style="margin-top:9px">'+links+fastaButtons(d,hg,t2)+'</div>'+
      '<div class="note" id="fastanote" style="min-height:0"></div></div>'+
    '<div class="panel"><h2>Locus map ±1 kb ('+(gasm||"—")+')'+
@@ -91,7 +100,8 @@ function render(d,h){
        ' gene models, gEVE ORFs and HERVarium domains are hg38-only and are omitted</span>':"")+
      (gco?'<span class="dlbtns"><button class="ucsc dl" data-dl="svg" title="download this map as SVG '+
        '(drawn in your browser)">SVG</button><button class="ucsc dl" data-dl="png" title="download this map as PNG, '+
-       '2\u00d7 resolution (drawn in your browser)">PNG</button></span>':"")+
+       '2\u00d7 resolution (drawn in your browser)">PNG</button>'+dlt("features","features TSV","every feature drawn on this map, one row each, with coordinates")+
+       (gasm==="hg38"&&d.cv?dlt("coverage","coverage TSV","mean coverage per 100-bp bin for every tissue group (the coverage view\u2019s values)"):"")+'</span>':"")+
      '</h2>'+
      '<div id="gfx">'+
      (gco?'<div class="note">rendering…</div>'
@@ -100,15 +110,16 @@ function render(d,h){
    '<div class="two">'+
      '<div class="panel"><h2>Locus</h2><dl class="kv">'+
        kv("group",d.group)+kv("band",d.band)+kv("origin",d.origin)+
-       kv("structure",st.structure)+kv("category",st.category)+
+       kv("structure",structWords(st.structure))+kv("category",st.category)+
        kv("LTR names",st.ltr_names)+kv("internal names",st.int_names)+
        kv("tandem/nested",st.is_tandem_or_nested?"yes":"no")+
        kv("segments",d.segments.length+(d.segments.length?"":" (none stored)"))+
        spliceKv(d)+
      '</dl></div>'+
-     '<div class="panel"><h2>Group — '+esc(d.group)+'</h2><dl class="kv">'+
+     '<div class="panel"><h2>Group — '+esc(d.group)+(d.group?'<span class="dlbtns"><a class="ucsc" href="#browse?g='+encodeURIComponent(d.group)+
+       '" title="open the Browse tab filtered to this group">browse this group</a></span>':"")+'</h2><dl class="kv">'+
        kv("superfamily",g.superfamily)+kv("HERV class",g.herv_class)+
-       kv("loci in group",g.n_loci)+kv("int model",g.intModel)+
+       kv("Telescope loci characterised",g.n_loci)+kv("catalog loci in group",g.n_catalog)+kv("int model",g.intModel)+
        kv("RepBase class",g.repbase_class)+kv("HERVd family",g.hervd_family)+
        kv("dominant LTR",g.dominant_ltr)+
        kv("with flanking LTR",g.frac_with_flanking_ltr==null?null:(100*g.frac_with_flanking_ltr).toFixed(1)+"%")+
@@ -119,7 +130,7 @@ function render(d,h){
        // when "dominant" means 85% and when it means 38%.
        lineageKv(d,g)+
      '</dl></div></div>'+
-   '<div class="panel"><h2>Aliases — '+new Set(d.aliases.map(a=>a.alias_type)).size+' types</h2>'+aliasTable(d.aliases)+'</div>'+
+   '<div class="panel"><h2>Aliases — '+new Set(d.aliases.map(a=>a.alias_type)).size+' types<span class="dlbtns">'+dlt("aliases","TSV","all aliases of this locus")+'</span></h2>'+aliasTable(d.aliases)+'</div>'+
    tuPanel(d)+
    cclePanel(d)+
    tissuePanel(d)+rnaAtlasPanel(d)+
@@ -146,13 +157,142 @@ function render(d,h){
       ["seg_index","segment_class","repName","repFamily","repClass","chrom","start","end","strand","span","rmsk_sw_score"])+'</div>':"")+
    absentPanel(d,dfb);
   if(gco) drawLocus(d,gco,gasm);
+  decorate(d);
   document.querySelectorAll("button.fa").forEach(b=>b.onclick=()=>fetchFasta(d,b.dataset.fa,$("fastanote")));
   document.querySelectorAll("button.dl").forEach(b=>b.onclick=()=>downloadMap(d,gasm,b.dataset.dl));
+  document.querySelectorAll("button.dlt").forEach(b=>b.onclick=()=>downloadTSV(d,gasm,b.dataset.tsv));
   document.querySelectorAll("button.tsv").forEach(b=>b.onclick=()=>{
     TS_ALL=b.dataset.ts==="1"; const c=$("tschart"); if(c) c.innerHTML=tsChart(d);
     document.querySelectorAll("button.tsv").forEach(x=>x.classList.toggle("on",x.dataset.ts===b.dataset.ts)); });
 }
+const how=(label,html)=>'<details class="how"><summary>'+label+'</summary><div class="note">'+html+"</div></details>";
 function kv(k,v){return "<dt>"+esc(k)+"</dt><dd>"+fmt(v)+"</dd>";}
+/* Catalog codes shown as values (keep_released, ltr_and_internal, ...) read as words. */
+const hum=v=>v==null?v:String(v).replace(/_/g," ");
+/* LIL -> "LTR – internal – LTR (LIL)": the structure code spelled out, code kept. */
+function structWords(c){
+  if(!c||!/^[LI]+$/.test(c)||c.length>9) return c;
+  return c.split("").map(x=>x==="L"?"LTR":"internal").join(" \u2013 ")+" ("+c+")";
+}
+/* Position line under the identifiers: where the locus is, without scrolling to Coordinates. */
+function posLine(d,hg,t2){
+  const one=(asm,c)=>c?'<span class="mono">'+asm+" "+esc(c.chrom)+":"+ivx(c.start,c.end)+"</span> ("+
+    (c.strand==="+"||c.strand==="-"?(c.strand==="-"?"\u2212":"+")+" strand":"strand unknown")+") \u00b7 "+bpx(c.end-c.start):"";
+  const parts=[one("hg38",hg),hg?"":one("T2T",t2)].filter(Boolean);
+  if(hg&&t2) parts.push('<span class="mono">T2T '+esc(t2.chrom)+":"+ivx(t2.start,t2.end)+"</span>");
+  return parts.length?'<div class="posline">'+parts.join(" \u00b7 ")+neighbours(d)+"</div>":"";
+}
+/* The catalog loci on either side of this one on its hg38 chromosome (any group), from the
+   search index's list table; absent when the index is not loaded or the locus has no hg38 position. */
+let NEIGH=null;
+function neighbours(d){
+  if(typeof LM==="undefined"||!LM||typeof FZ==="undefined"||!FZ||!FZ.uids) return "";
+  if(!NEIGH){ const R=LM.rows, ord=[]; for(let i=0;i<R.length;i++) if(R[i][3]>=0&&R[i][4]>=0) ord.push(i);
+    ord.sort((a,b)=>R[a][3]-R[b][3]||R[a][4]-R[b][4]||a-b); NEIGH={ord,at:new Map(ord.map((i,n)=>[FZ.uids[i],n]))}; }
+  const n=NEIGH.at.get(d.uid); if(n==null) return "";
+  const R=LM.rows, me=R[NEIGH.ord[n]], one=(k,lab)=>{ const i=NEIGH.ord[k]; if(i==null||R[i][3]!==me[3]) return "";
+    const gap=k<n?me[4]-R[i][5]:R[i][4]-me[5];
+    return '<a href="#'+FZ.uids[i]+'" title="'+lab+" catalog locus on "+esc(LM.chroms[me[3]])+", "+(gap>0?gap.toLocaleString()+" bp away":"overlapping")+'">'+(k<n?"\u2039 ":"")+esc(R[i][0])+(k>n?" \u203a":"")+"</a>"; };
+  const a=one(n-1,"previous"), b=one(n+1,"next");
+  return a||b?'<span class="neigh">neighbours: '+[a,b].filter(Boolean).join(" \u00b7 ")+"</span>":"";
+}
+/* At-a-glance strip. Every chip restates a figure from a panel below and jumps to it;
+   nothing here is computed differently from its panel. Chips that qualify how the
+   expression panels may be read (intronic, host-exonic, host-following, low unique
+   mappability) are drawn as warnings so the caveat is visible before the data. */
+function glance(d){
+  const LK=(typeof LOOKUP!=="undefined"&&LOOKUP)||{}, g=d.group_info||{}, st=d.structure||{}, out=[];
+  const chip=(sec,k,v,warn,tip)=>out.push('<a class="chip'+(warn==="find"?" find":warn?" warn":"")+'" data-go="'+sec+'"'+(tip?' title="'+esc(tip)+'"':"")+
+    '><span class="k">'+esc(k)+"</span>"+v+"</a>");
+  chip("locus","group",esc(d.group||"\u2014")+(g.herv_class?' <span class="m">class '+esc(g.herv_class)+"</span>":""));
+  if(st.structure) chip("locus","structure",esc(structWords(st.structure))+(st.category?' <span class="m">'+esc(st.category)+"</span>":""));
+  const ts=d.ts, TM=LK.tissue;
+  if(ts&&TM){
+    const C=TM.cx||{}, cx=ts.cx;
+    if(cx&&C.primary){
+      const prim=C.primary[cx[0]], xcl=C.exonic_class[cx[2]], own=cx[7]===1, genes=cx[6]?cx[6].split("|").join(", "):"";
+      if(prim==="intronic") chip("tissues","genomic context","Intronic in "+esc(genes||"a host gene")+' <span class="m">detection is not element-specific</span>',true);
+      else if(prim==="exonic"&&own) chip("tissues","genomic context","Own gene model <span class=\"m\">GENCODE v50</span>");
+      else if(prim==="exonic"&&(xcl==="exonised"||xcl==="antisense_only"))
+        chip("tissues","genomic context","Exonic in a"+(xcl==="exonised"?" host":"n antisense")+" transcript"+(genes?" ("+esc(genes)+")":"")+' <span class="m">detection may be host signal</span>',true);
+      else if(prim==="exonic") chip("tissues","genomic context","Starts a transcript"+(genes?" ("+esc(genes)+")":"")+' <span class="m">GENCODE v50</span>');
+      else chip("tissues","genomic context","Intergenic");
+    }
+    const se=d.se, SM=LK.strand;
+    if(se&&SM){
+      if(se[7]) chip("tissues","stranded RNA",'\u2605 Element-strand candidate <span class="m">own-strand signal '+(2**(se[4]/100)).toFixed(1)+"\u00d7 its flanks</span>","find",
+        "Intronic, host transcribed antisense: unstranded data cannot see this element, but stranded RNA-seq puts its own-strand signal well above the surrounding intron.");
+      else if(se[0]>=2||se[1]+se[2]>=2) chip("tissues","stranded RNA","Own-strand RNA <span class=\"m\">"+(se[0]+se[1]+se[2])+" stranded samples</span>");
+    }
+    const hgq=ts.hg, rf=100*((TM.host||{}).rho_flag||0.5);
+    if(hgq&&hgq[2]!=null&&hgq[2]>=rf) chip("tissues","host gene","Coverage follows "+esc(hgq[1])+' <span class="m">\u03c1 = '+(hgq[2]/100).toFixed(2)+"</span>",true);
+  }
+  const um=((d.mappability||{}).stats||{}).umap100_hg38||((d.mappability||{}).stats||{}).umap100_t2t;
+  if(um&&!um.no_data&&um.frac!=null) chip("map","uniquely mappable",(100*um.frac).toFixed(0)+'% <span class="m">of locus, Umap 100-mers</span>',um.frac<0.5,
+    um.frac<0.5?"Less than half of this locus has unique 100-mers: reads are shared with other copies, so read-based signal here depends on the aligner.":"");
+  const nO=(d.geve||[]).length, nH=(d.hvorf||[]).length, nD=(d.domains||[]).length;
+  if(nO||nH||nD) chip("tables","ORFs and domains",[nO?nO+" gEVE ORF"+(nO>1?"s":""):"",nH?nH+" HERVOminer \u2265 81 aa":"",nD?nD+" domain"+(nD>1?"s":""):""].filter(Boolean).join(" \u00b7 "));
+  const sp=(d.splice||{}).t;
+  if(sp&&sp!=="not_assessable") chip("locus","splicing (Snaptron)",sp==="none"?"no qualifying junction":esc(SPLICE_TIER[sp]||sp));
+  if(ts&&TM){
+    const G=TM.groups; let n=0,dn=0,sn=0,jn=0;
+    G.forEach((gr,i)=>{ if(gr[3]<10) return; n++; if(ts.d[i]>=500) dn++; if(gr[4]){ jn++; if(ts.s[i]>=500) sn++; } });
+    chip("tissues","primary tissues","detected in "+dn+" of "+n+' groups <span class="m">own sense splicing in '+sn+" of "+jn+"</span>",false,
+      "Groups of at least 10 samples in which at least half the samples have the body detected (coverage per base > 1); and, of the groups with junction data, those in which at least half the samples have \u2265 "+TM.splice_min_reads+" own sense split reads.");
+    const tv=ts.tv||[]; if(tv.length){ const up=tv.filter(t=>t[2]===1).length, dnn=tv.filter(t=>t[2]===-1).length;
+      chip("tissues","tumour vs adjacent normal",(up?"higher in "+up:"")+(up&&dnn?", ":"")+(dnn?"lower in "+dnn:"")+(up||dnn?"":"no change called")+' <span class="m">of '+tv.length+" TCGA projects</span>"); }
+  }
+  const cc=d.cc||{}, CM=LK.ccle;
+  if(CM&&cc.tel) chip("ccle","CCLE cell lines","\u2265 1 TPM in "+(100*cc.tel.n1/CM.n_lines).toFixed(0)+'% <span class="m">Telescope, '+CM.n_lines.toLocaleString()+" lines</span>");
+  else if(CM&&cc.bf&&cc.bf.n_body!=null){ const NK=CM.n_lines_kmer||CM.n_lines;
+    chip("ccle","CCLE cell lines","body detected in "+(100*cc.bf.n_body/NK).toFixed(0)+'% <span class="m">31-mer, '+NK.toLocaleString()+" lines</span>"); }
+  return '<div class="glance" id="glance">'+out.join("")+"</div>";
+}
+/* Section navigation, foldable reference tables and copy buttons, wired after render()
+   has written the page. Sections are found from the panel titles, so the bar lists only
+   what this locus has. A link is #<locus_uid>/<section>; route() in index.html opens it. */
+const SECTIONS=[[/^Locus map/,"map","Map"],[/^Locus$/,"locus","Locus & group"],[/^Aliases/,"aliases","Aliases"],
+  [/^Transcriptional unit/,"tu","Unit"],[/^CCLE expression/,"ccle","CCLE"],[/^Primary tissues/,"tissues","Tissues"],
+  [/^RNA Atlas/,"rna","RNA Atlas"],[/^Transcription initiation/,"tss","TSS & splicing"],[/^Coordinates/,"coords","Coordinates"]];
+const FOLDS=/^(Dfam best alignment|gEVE ORFs|HERVarium domains|HERVarium elements|HERVOminer ORFs|Overlapping genes|Segments)/;
+const FOLD_OPEN=new Set();
+let PENDING_SEC=null;
+function decorate(d){
+  if(typeof document==="undefined"||!document.querySelectorAll) return;
+  const nav=document.getElementById("locnav"), seen=[]; let tables=false;
+  document.querySelectorAll("#view .panel").forEach(p=>{
+    const h=p.querySelector&&p.querySelector("h2"); if(!h) return;
+    const t=(h.firstChild&&h.firstChild.nodeType===3?h.firstChild.textContent:h.textContent).trim();
+    const m=SECTIONS.find(x=>x[0].test(t));
+    if(m){ p.setAttribute("data-sec",m[1]); seen.push(m); return; }
+    if(FOLDS.test(t)||/^(HML-2 provirus|ERV Navigator|Expression of genes|Not present)/.test(t)){
+      if(!tables){ tables=true; p.setAttribute("data-sec","tables"); }
+      if(FOLDS.test(t)){ const key=t.replace(/\s+\u2014.*$/,"");
+        p.classList.add("fold"); if(!FOLD_OPEN.has(key)) p.classList.add("closed");
+        h.setAttribute("role","button"); h.setAttribute("tabindex","0"); h.setAttribute("aria-expanded",String(FOLD_OPEN.has(key)));
+        h.title="show or hide this table";
+        const tog=()=>{ const open=p.classList.toggle("closed")===false; h.setAttribute("aria-expanded",String(open)); if(open) FOLD_OPEN.add(key); else FOLD_OPEN.delete(key); };
+        h.onclick=tog; h.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); tog(); } }; }
+    }
+  });
+  if(nav){
+    nav.innerHTML='<b>'+esc(d.combined_id)+"</b>"+seen.map(m=>'<a data-go="'+m[1]+'">'+esc(m[2])+"</a>").join("")+
+      (tables?'<a data-go="tables">Annotation tables</a><a class="sp" id="foldall" title="open or close every annotation table">expand tables</a>':"");
+    const fa=document.getElementById("foldall");
+    if(fa) fa.onclick=()=>{ const cl=[...document.querySelectorAll("#view .panel.fold")], open=cl.some(p=>p.classList.contains("closed"));
+      cl.forEach(p=>{ if(p.classList.contains("closed")===open) p.querySelector("h2").onclick(); }); fa.textContent=open?"collapse tables":"expand tables"; };
+  }
+  document.querySelectorAll("#view [data-go]").forEach(a=>{ a.onclick=e=>{ if(e&&e.preventDefault) e.preventDefault(); goSection(d,a.getAttribute("data-go")); }; });
+  document.querySelectorAll("#view button.cpy").forEach(b=>{ b.onclick=()=>{ const v=b.getAttribute("data-copy"), done=()=>{ b.textContent="copied"; setTimeout(()=>{b.textContent="copy";},1200); };
+    if(typeof navigator!=="undefined"&&navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(done,()=>{}); }; });
+  if(PENDING_SEC){ const s=PENDING_SEC; PENDING_SEC=null; goSection(d,s,true); }
+}
+function goSection(d,sec,quiet){
+  const p=document.querySelector('#view [data-sec="'+sec+'"]'); if(!p) return;
+  if(p.classList.contains("fold")&&p.classList.contains("closed")) p.querySelector("h2").onclick();
+  if(p.scrollIntoView) p.scrollIntoView({behavior:quiet?"auto":"smooth",block:"start"});
+  if(typeof history!=="undefined"&&history.replaceState) try{ history.replaceState(null,"","#"+d.uid+"/"+sec); }catch(_){}
+}
 /* CCLE segment shading: log2(fraction + 0.01), rescaled to 0-1, so the low end
    (1 vs 30 of 1,019 lines) is as distinguishable as the high end. 0 lines = outline. */
 function ccO(n,NL){
@@ -167,12 +307,12 @@ function ccO(n,NL){
    Shared by the Telescope (>= 1 TPM) and 31-mer (body detected) readouts so the
    two use identical axes and encoding. k[i] = lines meeting it in tissue i. */
 function tisChart(TIS,k,extra,crit){
-  const ML=30, BW=19, CH=60, W=ML+TIS.length*BW+80, H=CH+104, Y=f=>CH-f*CH+4;
+  const ML=36, BW=20, CH=64, W=ML+TIS.length*BW+66, H=CH+130, Y=f=>CH-f*CH+4;
   const short={haematopoietic_and_lymphoid_tissue:"blood / lymphoid",central_nervous_system:"CNS",
     upper_aerodigestive_tract:"upper aerodigestive"};
   const axis=[[0,"0"],[0.5,"50%"],[1,"100%"]].map(p=>'<line x1="'+ML+'" y1="'+Y(p[0])+'" x2="'+(ML+TIS.length*BW)+'" y2="'+Y(p[0])+
     '" stroke="var(--axis)" stroke-width="'+(p[0]===0?0.9:0.6)+'"'+(p[0]===0.5?' stroke-dasharray="4,3"':p[0]===1?' stroke-dasharray="1,3"':"")+'/>'+
-    '<text x="'+(ML-4)+'" y="'+(Y(p[0])+3)+'" font-size="8" fill="var(--mut)" text-anchor="end">'+p[1]+"</text>").join("");
+    '<text x="'+(ML-4)+'" y="'+(Y(p[0])+3.5)+'" font-size="10" fill="var(--mut)" text-anchor="end">'+p[1]+"</text>").join("");
   const bars=TIS.map((T,i)=>{
     const n=T[1], c=k[i]||0, f=n?c/n:0, h=Math.max(f>0?1.5:0,f*CH), X=ML+i*BW, few=n<5;
     const nm=short[T[0]]||T[0].replace(/_/g," ");
@@ -181,7 +321,7 @@ function tisChart(TIS,k,extra,crit){
     return '<g'+tipA(card(T[0].replace(/_/g," "),rows,"var(--ccle)"))+'><rect x="'+X+'" y="0" width="'+BW+'" height="'+(CH+10)+'" fill="transparent"/>'+
       '<rect x="'+(X+2)+'" y="'+(Y(f)-(f>0&&f*CH<1.5?1.5-f*CH:0))+'" width="'+(BW-4)+'" height="'+h+'" fill="var(--ccle)" rx="1"'+
       (few?' fill-opacity="0.35"':"")+'/>'+
-      '<text transform="translate('+(X+BW/2-2)+','+(CH+12)+') rotate(55)" font-size="8" fill="var(--mut)">'+esc(nm)+" ("+n+")</text></g>";
+      '<text transform="translate('+(X+BW/2-2)+','+(CH+13)+') rotate(55)" font-size="10" fill="var(--mut)">'+esc(nm)+" ("+n+")</text></g>";
   }).join("");
   return '<svg class="tischart" viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:'+W+'px">'+axis+bars+"</svg>";
 }
@@ -200,7 +340,7 @@ const TS_TIER={1:["A","own sense splicing up","var(--cat2)"],2:["B","excess over
   3:["C","host gene / host splicing explains it","var(--cat6)"],4:["D","unresolved","var(--neutral)"]};
 let TS_ALL=false;
 function tsRows(d,idx,meta,head){
-  const ts=d.ts, G=meta.groups, RH=23, LW=210, BW=260, HX=LW+BW+10, HW=44, C1=HX+HW+156, C2=C1+68, C3=C2+76, W=C3+300;
+  const ts=d.ts, G=meta.groups, RH=25, LW=226, BW=200, HX=LW+BW+10, HW=36, C1=HX+HW+152, C2=C1+74, C3=C2+62, W=C3+410;
   // value columns (D46): median element RPKM, body exon : other body coverage, highest samples
   const co38=(d.coord||[]).find(c=>c.assembly==="hg38"), hasCov=!!(d.cov&&d.cv&&d.pf&&co38);
   const TTL=((LOOKUP||{}).top_samples||{}).labels||[], TT={}; (d.tt||[]).forEach(e=>{TT[e[0]]=e[1];});
@@ -209,35 +349,35 @@ function tsRows(d,idx,meta,head){
   const rk=v=>v==null?"\u2014":(v/100)<0.1?(v>0?"<0.1":"0"):(v/100).toFixed((v/100)<10?1:0);
   const pc=v=>v==null||v<0?"\u2014":v===0?"0%":v<10?"<1%":Math.round(v/10)+"%";
   const flt=["no unique flank segment \u2014 dominance cannot reject read-through here","upstream flank only","downstream flank only","both flanks"][ts.fl||0];
-  let y=14, out='<text x="'+(HX+HW+6)+'" y="9" font-size="8.5" fill="var(--mut)">det \u00b7 dom \u00b7 local \u00b7 spliced</text>'+
-    '<text x="'+C1+'" y="9" font-size="8.5" fill="var(--mut)">median RPKM</text>'+
-    '<text x="'+C2+'" y="9" font-size="8.5" fill="var(--mut)">exon : rest</text>'+
-    '<text x="'+C3+'" y="9" font-size="8.5" fill="var(--mut)">highest samples (mean coverage / base)</text>';
+  let y=16, out='<text x="'+(HX+HW+6)+'" y="10" font-size="10" fill="var(--mut)"><title>share of samples: detected \u00b7 body-dominant \u00b7 local excess \u00b7 own sense splicing</title>det \u00b7 dom \u00b7 local \u00b7 spliced</text>'+
+    '<text x="'+C1+'" y="10" font-size="10" fill="var(--mut)">median RPKM</text>'+
+    '<text x="'+C2+'" y="10" font-size="10" fill="var(--mut)">exon : rest</text>'+
+    '<text x="'+C3+'" y="10" font-size="10" fill="var(--mut)">highest samples (mean coverage / base)</text>';
   for(const blk of idx){
-    if(blk[0]){ out+='<text x="0" y="'+(y+11)+'" font-size="10" font-weight="600" fill="var(--ink)">'+esc(blk[0])+"</text>"; y+=16; }
+    if(blk[0]){ out+='<text x="0" y="'+(y+12)+'" font-size="11.5" font-weight="600" fill="var(--ink)">'+esc(blk[0])+"</text>"; y+=18; }
     for(const i of blk[1]){
       const g=G[i], dv=ts.d[i], bv=ts.b?ts.b[i]:null, sv=ts.s[i], few=g[3]<10, k=TS_KIND[g[2]]||[g[2],"var(--neutral)"];
       const lv=(ts.lx&&!lxOff)?ts.lx[i]:null, hv=ts.he?ts.he[i]:null;
       const tip=card(g[0],[["kind",k[0]],["samples (coverage)",g[3]+(few?" \u2014 too few for a reliable share":"")],
-        ["detected (cpb > 1)",pc(dv)],["body-dominant (> 2\u00d7 flanks)",pc(bv)+" \u00b7 "+flt],["samples (junctions)",g[4]||"no junction data"],
+        ["detected (coverage per base > 1)",pc(dv)],["body-dominant (> 2\u00d7 flanks)",pc(bv)+" \u00b7 "+flt],["samples (junctions)",g[4]||"no junction data"],
         ["\u2265 "+meta.splice_min_reads+" own sense split reads"+(meta.splice_excl?" (unique junctions)":""),pc(sv)],
         ...(ts.sa?[["\u2003including non-unique junctions",pc(ts.sa[i])]]:[]),
         ...(ts.sb?[["\u2003also excluding possibly shared",pc(ts.sb[i])]]:[]),
-        ["local excess (\u2265 2\u00d7 flanking background)",lxOff?"not shown: intronic, host antisense (ENCODE: excess here is host-strand)":ts.lx?pc(lv):"no background window"],
+        ["local excess (\u2265 2\u00d7 flanking background)",lxOff?"not shown: intronic, host antisense (stranded RNA-seq: excess here is host-strand)":ts.lx?pc(lv):"no background window"],
         ["median element / host (RPKM)",rk(ts.em?ts.em[i]:null)+" / "+(ts.hm?rk(ts.hm[i]):"no host gene")],
         ["host expressed (\u2265 1 RPKM)",ts.he?pc(hv):"no host gene"]],k[1]);
       const bar=(v,yy,h,op)=>v>0?'<rect x="'+LW+'" y="'+(y+yy)+'" width="'+Math.max(1.5,BW*v/1000)+'" height="'+h+'" fill="'+k[1]+'" fill-opacity="'+(few?op*0.5:op)+'"/>':"";
       out+='<g'+tipA(tip)+'><rect x="0" y="'+y+'" width="'+W+'" height="'+RH+'" fill="transparent"/>'+
-        '<text x="'+(LW-6)+'" y="'+(y+12)+'" font-size="9.5" text-anchor="end" fill="'+(few?"var(--mut)":"var(--ink)")+'">'+
+        '<text x="'+(LW-6)+'" y="'+(y+16)+'" font-size="11" text-anchor="end" fill="'+(few?"var(--mut)":"var(--ink)")+'">'+
           esc(g[1])+' <tspan fill="var(--mut)">('+g[3]+")</tspan></text>"+
         '<rect x="'+LW+'" y="'+(y+2)+'" width="'+BW+'" height="'+(RH-4)+'" fill="var(--maptrack)"/>'+
-        bar(dv,2,4,0.3)+bar(bv,7,4,0.62)+(lv!=null?(lv>0?'<rect x="'+LW+'" y="'+(y+12)+'" width="'+Math.max(1.5,BW*lv/1000)+'" height="4" fill="none" stroke="'+k[1]+'" stroke-width="1"/>':""):"")+bar(sv,17,4,1)+
+        bar(dv,3,4,0.3)+bar(bv,8,4,0.62)+(lv!=null?(lv>0?'<rect x="'+LW+'" y="'+(y+13)+'" width="'+Math.max(1.5,BW*lv/1000)+'" height="4" fill="none" stroke="'+k[1]+'" stroke-width="1"/>':""):"")+bar(sv,18,4,1)+
         (hv!=null?'<rect x="'+HX+'" y="'+(y+5)+'" width="'+HW+'" height="'+(RH-10)+'" fill="var(--maptrack)"/>'+(hv>0?'<rect x="'+HX+'" y="'+(y+5)+'" width="'+Math.max(1.5,HW*hv/1000)+'" height="'+(RH-10)+'" fill="var(--neutral)"/>':""):"")+
-        '<text x="'+(HX+HW+6)+'" y="'+(y+14)+'" font-size="9" fill="var(--mut)">'+pc(dv)+" \u00b7 "+pc(bv)+" \u00b7 "+(lv!=null?pc(lv):"\u2014")+(sv>=0?" \u00b7 "+pc(sv):"")+"</text>"+
-        '<text x="'+C1+'" y="'+(y+14)+'" font-size="9" fill="var(--ink)">'+rk(ts.em?ts.em[i]:null)+"</text>"+
-        '<text x="'+C2+'" y="'+(y+14)+'" font-size="9" fill="var(--ink)">'+(()=>{ const er=hasCov?covExonRest(d,co38,i):null;
+        '<text x="'+(HX+HW+6)+'" y="'+(y+16)+'" font-size="10" fill="var(--mut)">'+pc(dv)+" \u00b7 "+pc(bv)+" \u00b7 "+(lv!=null?pc(lv):"\u2014")+(sv>=0?" \u00b7 "+pc(sv):"")+"</text>"+
+        '<text x="'+C1+'" y="'+(y+16)+'" font-size="10.5" fill="var(--ink)">'+rk(ts.em?ts.em[i]:null)+"</text>"+
+        '<text x="'+C2+'" y="'+(y+16)+'" font-size="10.5" fill="var(--ink)">'+(()=>{ const er=hasCov?covExonRest(d,co38,i):null;
           return er?(er[1]>0?"\u00d7"+fv(er[0]/er[1]):(er[0]>0?"rest < .01":"\u2014")):"\u2014"; })()+"</text>"+
-        '<text x="'+C3+'" y="'+(y+14)+'" font-size="8.5" fill="var(--ink)">'+(TT[i]?(()=>{ const a=TT[i], o=[];
+        '<text x="'+C3+'" y="'+(y+16)+'" font-size="10" fill="var(--ink)">'+(TT[i]?(()=>{ const a=TT[i], o=[];
           for(let q=0;q<a.length;q+=2) o.push(esc(TTL[a[q]])+' <tspan fill="var(--mut)">'+covF(a[q+1]/1000)+"</tspan>");
           return o.join(" \u00b7 "); })():'<tspan fill="var(--mut)">none \u2265 '+(((LOOKUP||{}).top_samples||{}).min||0.3)+"</tspan>")+"</text></g>";
       y+=RH;
@@ -245,10 +385,10 @@ function tsRows(d,idx,meta,head){
     y+=6;
   }
   const ax=[0,0.5,1].map(f=>'<line x1="'+(LW+BW*f)+'" y1="0" x2="'+(LW+BW*f)+'" y2="'+(y-6)+'" stroke="var(--axis)" stroke-width="0.5"'+
-    (f===0.5?' stroke-dasharray="3,3"':"")+'/><text x="'+(LW+BW*f)+'" y="'+(y+6)+'" font-size="8.5" text-anchor="middle" fill="var(--mut)">'+
+    (f===0.5?' stroke-dasharray="3,3"':"")+'/><text x="'+(LW+BW*f)+'" y="'+(y+8)+'" font-size="10" text-anchor="'+(f===1?"end":"middle")+'" fill="var(--mut)">'+
     (f*100)+"%</text>").join("");
-  const hax=ts.he?'<text x="'+(HX+HW/2)+'" y="'+(y+6)+'" font-size="8.5" text-anchor="middle" fill="var(--mut)">host</text>':"";
-  return '<svg class="tsbars" viewBox="0 0 '+W+" "+(y+10)+'" width="100%" style="max-width:'+W+'px">'+out+ax+hax+"</svg>";
+  const hax=ts.he?'<text x="'+(HX+HW/2)+'" y="'+(y+8)+'" font-size="10" text-anchor="middle" fill="var(--mut)">host</text>':"";
+  return '<svg class="tsbars" viewBox="0 0 '+W+" "+(y+13)+'" width="100%" style="max-width:'+W+'px">'+out+ax+hax+"</svg>";
 }
 function tsKey(){
   const sw=(op,lab)=>'<span style="display:inline-block;width:22px;height:6px;background:var(--cat1);opacity:'+op+';margin:0 4px 1px 10px;vertical-align:middle"></span>'+lab;
@@ -303,21 +443,22 @@ function tsChart(d){
   return '<div class="tsall">'+tsRows(d,blocks.slice(0,1),meta)+tsRows(d,blocks.slice(1),meta)+"</div>";
 }
 function tsContext(d,meta){
-  const ts=d.ts, C=meta.cx||{}, cx=ts.cx, en=ts.en, n=meta.encode_experiments;
-  const [o,sf]=en||[0,null], fl=ts.fl||0;
+  const ts=d.ts, C=meta.cx||{}, cx=ts.cx;
+  const fl=ts.fl||0;
   const genes=cx&&cx[6]?cx[6].split("|").map(g=>esc(g)).join(", "):"";
-  const enc=en?" ENCODE stranded RNA-seq ("+n+" tissue samples): "+(sf!=null?sf+"% of the signal over the element is on its own strand":"no signal over the element")+".":"";
+  // Stranded evidence is stated once, by tsStrand() below (S32 pilot on the D48 loci); the
+  // 2026-10 ENCODE values (ts.en, v2 segments, masked where segments changed) are no longer shown.
+  const enc="";
   const flank=fl===0?" This locus has no unique flank segment, so body dominance cannot reject read-through here.":"";
   const box=(title,body)=>'<div class="tsflag"><b>'+title+"</b> "+body+"</div>";
-  if(!cx) return en?'<div class="note">'+enc+"</div>":"";
+  if(!cx) return "";
   const prim=C.primary[cx[0]], hor=C.host_orient[cx[1]], xcl=C.exonic_class[cx[2]], sup=C.support[cx[3]], gcl=C.gclass[cx[4]], own=cx[7]===1;
   const READS="Unstranded detection (pale bars) counts every read over the element\u2019s unique sequence, so it records host transcription here as well. "+
     "Body dominance and own sense splicing are the more element-specific readouts.";
   if(prim==="intronic"){
     const hs={same:"on the element\u2019s strand",antisense:"on the opposite strand",both:"on both strands"}[hor];
-    let why=hor==="antisense"&&sf!=null&&sf<20?" ENCODE confirms the host strand: only "+sf+"% of the stranded signal here is the element\u2019s own.":
-            hor==="same"?" Because the host is transcribed on the element\u2019s own strand, stranded data cannot separate the two here either.":
-            enc;
+    let why=hor==="same"?" Because the host is transcribed on the element\u2019s own strand, stranded data cannot separate the two here either.":
+            hor==="antisense"?" Stranded RNA-seq separates the two here; see below.":"";
     return box("Intronic locus \u2014 detection is not element-specific.","It lies in an intron of "+(genes||"a host gene")+" ("+esc(gcl)+"), transcribed "+hs+
       ", with no exon of any GENCODE v50 transcript over it. Detection at intronic loci follows each sample\u2019s intronic RNA content (host pre-mRNA, retained introns) "+
       "and varies across tissues for that reason. "+READS+why+flank);
@@ -337,9 +478,25 @@ function tsContext(d,meta){
       return box("Exonic in a "+(xcl==="exonised"?"host":"antisense")+" transcript \u2014 detection may be host signal.","GENCODE v50: "+what+tail+" "+READS+enc+flank);
     return '<div class="note" style="margin:4px 0 8px">GENCODE v50: '+what+tail+enc+flank+"</div>";
   }
-  const on={1:"flanking transcription runs antisense to the element",2:"flanking transcription is on the element\u2019s strand",3:"flanking transcription is on both strands",0:"no flanking transcription"}[o];
-  return '<div class="note" style="margin:4px 0 8px">Intergenic: no GENCODE v50 transcript spans the element.'+(en?" In ENCODE stranded RNA-seq, "+on+
-    (sf!=null?"; "+sf+"% of the signal over the element is on its own strand.":"."):"")+flank+"</div>";
+  return '<div class="note" style="margin:4px 0 8px">Intergenic: no GENCODE v50 transcript spans the element.'+flank+"</div>";
+}
+/* Stranded pilot and long reads (S32, D54): one block under the context note. se = [ENCODE own-strand
+   tracks, Blueprint normal, Blueprint malignant, own-strand share %, log2 own body/flank x100,
+   long-read element-like reads, long-read samples, candidate]. */
+function tsStrand(d){
+  const LK=(typeof LOOKUP!=="undefined"&&LOOKUP)||{}, M=LK.strand, se=d.se;
+  if(!M) return "";
+  const src=M.encode_experiments+" ENCODE tissue experiments and "+(M.blueprint_normal+M.blueprint_malignant)+" Blueprint blood samples ("+M.blueprint_malignant+" malignant)";
+  if(!se) return '<div class="note" style="margin:0 0 8px">Stranded pilot ('+src+"): no own-strand signal over this element; no element-like long reads ("+M.longread_runs+" runs).</div>";
+  const call=se[0]>=2||se[1]+se[2]>=2, lx=se[4]==null?null:2**(se[4]/100);
+  const parts=["own-strand expressed in "+se[0]+" ENCODE, "+se[1]+" normal and "+se[2]+" malignant Blueprint samples"+(call?"":" (below the \u2265 2-sample call)"),
+    se[3]!=null?se[3]+"% of the stranded signal over the element is on its own strand":"",
+    lx!=null?"own-strand signal over the element is "+lx.toFixed(1)+"\u00d7 that 2\u201310 kb either side ("+(lx>4?"local to the element":lx>2?"partly local":"a transcript running through the region")+")":"",
+    se[5]?se[5]+" element-like long read"+(se[5]>1?"s":"")+" on its own strand (contained in or ending in the element; "+se[6]+" sample"+(se[6]>1?"s":"")+")":"no element-like long reads"].filter(Boolean);
+  if(se[7]) return '<div class="tsfind"><b>\u2605 Element-strand candidate.</b> This intronic element sits antisense to its host\u2019s transcription, so unstranded '+
+    "detection above reflects the host. Stranded RNA-seq shows its own strand: "+parts.join("; ")+". One of "+M.n_candidates+" such loci in the catalog \u2014 "+
+    'worth a closer look (<a href="#browse?esc=1">list all</a>). Source: '+src+".</div>";
+  return '<div class="note" style="margin:0 0 8px">Stranded pilot ('+src+"; "+M.longread_runs+" long-read runs): "+parts.join("; ")+".</div>";
 }
 function tsTvn(d,meta){
   const tv=d.ts.tv; if(!tv||!tv.length) return "";
@@ -353,22 +510,23 @@ function tsTvn(d,meta){
   }).join("");
   return '<h3 style="margin-top:12px">Tumour vs matched adjacent normal (TCGA)</h3><table class="t tstvn"><tr><th>project (pairs)</th>'+
     "<th>log\u2082 change</th><th></th><th>call (q &lt; 0.01, \u2265 2-fold)</th><th>evidence for the change</th></tr>"+rows+"</table>"+
-    '<div class="note">Mean paired change in body coverage, unadjusted. Evidence: <b>A</b> the element\u2019s own sense splicing also rises; '+
-    "<b>B</b> its excess over flanking exon-free sequence rises (not used for intronic elements antisense to the host, where ENCODE "+
+    how("How the evidence tiers are defined",'Mean paired change in body coverage, unadjusted. Evidence: <b>A</b> the element\u2019s own sense splicing also rises; '+
+    "<b>B</b> its excess over flanking exon-free sequence rises (not used for intronic elements antisense to the host, where stranded RNA-seq "+
     "shows that excess is host-strand); <b>C</b> the host gene or junctions spanning the element rise by at least half as much; "+
-    "<b>D</b> none of these. Tumours carry more intronic RNA than their normals in most projects (intron retention), so a gain without A or B "+
+    "<b>D</b> none of these.")+
+    '<div class="note">Tumours carry more intronic RNA than their normals in most projects (intron retention), so a gain without A or B '+
     "may be host transcription.</div>";
 }
 function tissuePanel(d){
   const meta=(LOOKUP||{}).tissue; if(!meta||!d.ts) return "";
   return '<div class="panel" id="tspanel"><h2>Primary tissues \u2014 TCGA, GTEx and CCLE (recount3, Snaptron)'+
     '<span class="dlbtns"><button class="ucsc tsv'+(TS_ALL?"":" on")+'" data-ts="0">priority groups</button>'+
-    '<button class="ucsc tsv'+(TS_ALL?" on":"")+'" data-ts="1">all '+meta.groups.length+" groups</button></span></h2>"+
-    tsContext(d,meta)+tsHost(d,meta)+tsKey()+'<div id="tschart">'+tsChart(d)+"</div>"+tsJunctions(d,meta)+
-    '<div class="note">'+"Bars per group: share of samples with the body <b>detected</b> (recount3 coverage over the locus\u2019s unique segments, cpb > 1); share <b>body-dominant</b> (detected, and mean coverage over the body more than twice that over each unique flank, which rejects read-through from surrounding transcription); share with \u2265 "+meta.splice_min_reads+" split reads on the element\u2019s own strand with an end in its body "+
-    "(Snaptron; summed over its junctions; junctions that cannot be assigned to one locus are left out \u2014 see the list below the chart). <b>Local excess</b> (outlined): detected, and body coverage at least twice that of exon-free sequence 2\u201310 kb either side; not shown for intronic elements antisense to their host, where ENCODE puts that excess on the host strand. <b>Host</b> (grey, right): share of samples expressing the host gene (GENCODE v50 exons outside HERVs, \u2265 1 RPKM). Numbers: detected \u00b7 body-dominant \u00b7 local excess \u00b7 spliced. Samples in brackets; grey labels have fewer than 10. "+
-    meta.excluded_samples+" samples without a tissue label or with very low coverage are excluded. "+
-    "Detection in intron-rich samples partly reflects host pre-mRNA; own splicing does not.</div>"+
+    '<button class="ucsc tsv'+(TS_ALL?" on":"")+'" data-ts="1">all '+meta.groups.length+" groups</button>"+dlt("tissues","TSV","every value in this panel for all "+meta.groups.length+" groups, plus the tumour vs normal table")+"</span></h2>"+
+    tsContext(d,meta)+tsStrand(d)+tsHost(d,meta)+tsKey()+'<div id="tschart">'+tsChart(d)+"</div>"+tsJunctions(d,meta)+
+    how("How to read the bars and numbers","Bars per group: share of samples with the body <b>detected</b> (recount3 coverage over the locus\u2019s unique segments, coverage per base (cpb) > 1); share <b>body-dominant</b> (detected, and mean coverage over the body more than twice that over each unique flank, which rejects read-through from surrounding transcription); share with \u2265 "+meta.splice_min_reads+" split reads on the element\u2019s own strand with an end in its body "+
+    "(Snaptron; summed over its junctions; junctions that cannot be assigned to one locus are left out \u2014 see the list below the chart). <b>Local excess</b> (outlined): detected, and body coverage at least twice that of exon-free sequence 2\u201310 kb either side; not shown for intronic elements antisense to their host, where stranded RNA-seq puts that excess on the host strand. <b>Host</b> (grey, right): share of samples expressing the host gene (GENCODE v50 exons outside HERVs, \u2265 1 RPKM). Numbers: detected \u00b7 body-dominant \u00b7 local excess \u00b7 spliced. Samples in brackets; grey labels have fewer than 10. "+
+    meta.excluded_samples+" samples without a tissue label or with very low coverage are excluded.")+
+    '<div class="note">Detection in intron-rich samples partly reflects host pre-mRNA; own splicing does not.</div>'+
     tsTvn(d,meta)+"</div>";
 }
 function cclePanel(d){
@@ -401,17 +559,17 @@ function cclePanel(d){
       kv("body > 2\u00d7 "+f3+" flank",bf.dom_3==null?"\u2014":pctK(bf.dom_3))+
       kv("body > 2\u00d7 both flanks",bf.dom_both==null?"\u2014":pctK(bf.dom_both))+
       (bf.hs!=null?kv("high-specificity set","yes \u2014 spec_ds "+bf.hs):"")+"</dl>"+
-      '<div class="note">Detected = the region\u2019s weighted sum of unique 31-mer counts exceeds '+meta.det_wsum+
+      how("How the 31-mer call is made","Detected = the region\u2019s weighted sum of unique 31-mer counts exceeds "+meta.det_wsum+
       " (counts below "+meta.min_abund+" ignored; weight \u221d segment length). Against Telescope this call is "+
       "99.8% specific (lines Telescope scores 0) and 98% sensitive (lines at \u2265 1 TPM). "+'Body vs flank compares length-normalised weighted sums (weight \u221d segment length), so a long body '+
       "is not favoured over a 1 kb flank by size."+(bf.oriented?"":" No locus strand: flanks are genomic left/right.")+
-      " Segment positions are on the map (CCLE 31-mer lane).</div>"+
+      " Segment positions are on the map (CCLE 31-mer lane).")+
       "</div>";
     if(bf.tis) kmChart='<div><div class="note" style="margin-top:2px">31-mer: share of each tissue\u2019s cell lines with the body '+
       "detected (weighted sum > "+meta.det_wsum+", as above)</div>"+tisChart(meta.tissues_kmer||meta.tissues,bf.tis,null,"body detected")+"</div>";
   } else km='<div><h3>31-mer (locus-unique k-mers)</h3><div class="note">no locus-unique 31-mer in the body: '+
     "k-mer evidence cannot be attributed to this locus (see mappability)</div></div>";
-  return '<div class="panel"><h2>CCLE expression \u2014 '+NL.toLocaleString()+' cancer cell lines</h2><div class="ccgrid">'+
+  return '<div class="panel"><h2>CCLE expression \u2014 '+NL.toLocaleString()+' cancer cell lines<span class="dlbtns">'+dlt("ccle","TSV","per-tissue counts for both readouts")+'</span></h2><div class="ccgrid">'+
     tel+km+(cc.tel||(bf&&bf.tis)?telChart+kmChart:"")+'</div><div class="note" style="margin-top:8px">Two independent readouts of the same public CCLE RNA-seq runs: '+
     "Telescope reassigns multi-mapping reads by EM; the 31-mer readout asks whether k-mers unique to this locus occur in "+
     "each run. Where they disagree, the number of unique k-mers the locus has (mappability lanes, CCLE 31-mer lane) "+
@@ -457,6 +615,101 @@ async function fetchFasta(d,asm,note){
     ', from the <a target="_blank" href="https://genome.ucsc.edu/goldenPath/help/api.html">UCSC REST API</a>. '+
     "For many loci, use the bundle BEDs with the UCSC 2bit files instead.";
 }
+/* Data downloads. Each panel's values as a tab-separated table, written in the browser
+   from the record already loaded: nothing is fetched. Lines starting with # name the locus,
+   the table and its units; the first other line is the header. Shares are percentages of a
+   group's samples; positions are 0-based start, end-exclusive (BED convention) and say so. */
+const dlt=(kind,label,tip)=>'<button class="ucsc dlt" data-tsv="'+kind+'" title="download '+esc(tip)+' as a tab-separated file (written in your browser)">'+label+"</button>";
+function tsvText(d,asm,kind){
+  const LK=(typeof LOOKUP!=="undefined"&&LOOKUP)||{}, co=coordOf(d,asm)||{};
+  const cell=v=>v==null?"":String(v).replace(/[\t\n\r]+/g," "), line=a=>a.map(cell).join("\t");
+  const head=(what,notes)=>["# HERV catalog v2, dashboard v1.0 — "+d.versioned_id+" ("+d.uid+", "+d.combined_id+")","# table: "+what]
+    .concat((notes||[]).map(n=>"# "+n));
+  const pm=v=>v==null||v<0?"":(v/10).toFixed(1);                // per mille -> percent
+  const out=[]; let name=kind;
+  if(kind==="aliases"){
+    out.push(...head("aliases"),line(["alias_type","alias","assignment","is_current"]));
+    (d.aliases||[]).forEach(a=>out.push(line([a.alias_type,a.alias,a.assignment,a.is_current])));
+  } else if(kind==="tissues"){
+    const ts=d.ts, M=LK.tissue, G=M.groups, C=M.cx||{}, cx=ts.cx;
+    const lxOff=!!(cx&&C.primary&&C.primary[cx[0]]==="intronic"&&C.host_orient[cx[1]]==="antisense");
+    const co38=coordOf(d,"hg38"), hasCov=!!(d.cov&&d.cv&&d.pf&&co38);
+    const TTL=(LK.top_samples||{}).labels||[], TT={}; (d.tt||[]).forEach(e=>{TT[e[0]]=e[1];});
+    out.push(...head("primary tissues, one row per group (recount3 coverage, Snaptron junctions)",[
+      "pct_* columns: percentage of the group's samples. detected = coverage per base > 1 over the locus's unique segments; body_dominant = detected and body mean coverage > 2x each unique flank; local_excess = detected and body coverage >= 2x exon-free sequence 2-10 kb either side"+(lxOff?" (not reported here: intronic element antisense to its host)":"")+"; own_sense_spliced = >= "+M.splice_min_reads+" own sense split reads (unique junctions).",
+      "median_*_rpkm: median over the group's samples. exon_bins_mean_coverage / other_bins_mean_coverage: mean coverage per base per 1e9 aligned bases over the body's 100-bp bins that do / do not overlap a GENCODE v50 exon (all reads).",
+      "highest_samples: up to three samples with mean coverage per unique body base per 1e9 aligned bases >= "+((LK.top_samples||{}).min||0.3)+", as sample=value.",
+      "Detection is unstranded and counts host transcription; see the context note on the locus page before interpreting it."]),
+      line(["group","kind","n_samples_coverage","n_samples_junctions","pct_detected","pct_body_dominant","pct_local_excess","pct_own_sense_spliced",
+        "pct_spliced_incl_nonunique_junctions","pct_spliced_excl_possibly_shared","median_element_rpkm","median_host_rpkm","pct_host_expressed",
+        "exon_bins_mean_coverage","other_bins_mean_coverage","highest_samples"]));
+    G.forEach((g,i)=>{ const er=hasCov?covExonRest(d,co38,i):null, a=TT[i]||[], hs=[];
+      for(let q=0;q<a.length;q+=2) hs.push(TTL[a[q]]+"="+(a[q+1]/1000));
+      out.push(line([g[0],g[2],g[3],g[4]||"",pm(ts.d[i]),ts.b?pm(ts.b[i]):"",ts.lx&&!lxOff?pm(ts.lx[i]):"",pm(ts.s[i]),ts.sa?pm(ts.sa[i]):"",ts.sb?pm(ts.sb[i]):"",
+        ts.em&&ts.em[i]!=null?(ts.em[i]/100):"",ts.hm&&ts.hm[i]!=null?(ts.hm[i]/100):"",ts.he?pm(ts.he[i]):"",
+        er?+er[0].toFixed(4):"",er?+er[1].toFixed(4):"",hs.join(";")])); });
+    if(ts.tv&&ts.tv.length){
+      out.push("","# table: tumour vs matched adjacent normal (TCGA), mean paired log2 change in body coverage, unadjusted",
+        "# call: q < 0.01 and >= 2-fold. evidence tier: A own sense splicing also rises; B excess over flanking exon-free sequence rises; C host gene or spanning junctions rise at least half as much; D none of these.",
+        line(["project","n_pairs","log2_change","call","evidence_tier"]));
+      ts.tv.forEach(t=>{ const p=M.projects[t[0]], tr=TS_TIER[t[3]];
+        out.push(line([p[0],p[1],(t[1]/10).toFixed(1),t[2]===1?"higher in tumour":t[2]===-1?"lower in tumour":"no change called",tr?tr[0]:""])); });
+    }
+  } else if(kind==="ccle"){
+    const cc=d.cc||{}, M=LK.ccle;
+    out.push(...head("CCLE cell lines by tissue, two readouts of the same RNA-seq runs",[
+      "telescope: lines at >= 1 TPM (RetroelementDB Telescope quantification, hg38); median and maximum TPM in the tissue.",
+      "kmer_31: lines with the locus body detected (weighted sum of locus-unique 31-mer counts > "+M.det_wsum+")."]),
+      line(["readout","tissue","n_lines","n_lines_meeting_criterion","median_tpm","max_tpm"]));
+    if(cc.tel) M.tissues.forEach((T,i)=>out.push(line(["telescope",T[0],T[1],cc.tel.tis[i][2],cc.tel.tis[i][0],cc.tel.tis[i][1]])));
+    if(cc.bf&&cc.bf.tis) (M.tissues_kmer||M.tissues).forEach((T,i)=>out.push(line(["kmer_31",T[0],T[1],cc.bf.tis[i],"",""])));
+  } else if(kind==="rna"){
+    const M=LK.rna_atlas, val={}; (d.ra||[]).forEach(v=>{val[v[0]]=v[1]/100;});
+    out.push(...head("RNA Atlas Telescope TPM, one row per library (RetroelementDB; GSE138734)",["Values below "+M.min_tpm_stored+" TPM are not stored and are written as 0."]),
+      line(["library","sample","sample_type","organ_system","library_type","tpm"]));
+    M.libs.forEach((l,i)=>out.push(line([l[0],l[1],l[2],l[3],l[4]?"total RNA":"polyA",val[i]||0])));
+  } else if(kind==="coverage"){
+    const G=LK.tissue.groups, n=d.cv[1], b00=co.start+d.pf[0], UQ=covUniq(d,co);
+    out.push(...head("recount3 coverage per 100-bp bin, hg38, one row per bin and one column per tissue group",[
+      "Values: mean coverage per base per 1e9 aligned bases, mean over the group's samples (all reads), as stored (log-quantised in steps of about 6%; values under 0.01 are 0).",
+      "unique_100mer_share: share of the bin covered by Umap k100 unique blocks. Under 0.5 the coverage depends on where the aligner placed reads shared with other copies (hatched on the map).",
+      "start is 0-based, end is exclusive."]),
+      line(["chrom","start","end","in_locus_body","unique_100mer_share"].concat(G.map(g=>g[0]))));
+    for(let i=0;i<n;i++){ const a=b00+100*i;
+      out.push(line([co.chrom,a,a+100,(a+100>co.start&&a<co.end)?1:0,UQ?UQ[i].toFixed(2):""].concat(G.map((_,g)=>+covAt(d,g,i).toFixed(3))))); }
+  } else if(kind==="features"){
+    name="map_features_"+asm;
+    const PAD=1000, w0=Math.max(0,co.start-PAD), w1=co.end+PAD, isHg=asm==="hg38", inw=(a,b)=>b>w0&&a<w1, rows=[];
+    const add=(lane,nm,a,b,strand,detail)=>rows.push([lane,nm,co.chrom,a,b,strand||"",detail||""]);
+    add("locus",d.combined_id,co.start,co.end,co.strand,"locus extent");
+    if(isHg) (d.segments||[]).filter(s=>inw(s.start,s.end)).forEach(s=>add("segments",s.repName,s.start,s.end,s.strand,s.segment_class));
+    (d.repeats||[]).filter(r=>r.assembly===asm&&inw(r.start,r.end)).forEach(r=>add("RepeatMasker",r.rep_name,r.start,r.end,r.strand,[r.rep_class,r.rep_family].filter(Boolean).join("/")+"; "+r.pct_div+"% divergence"));
+    for(const [rs,lab] of [["pm151","pm151 easy (151b)"],["umap100","Umap k100 unique"]])
+      (((d.mappability||{}).blocks||{})[rs+"_"+asm]||[]).filter(b=>inw(b[0],b[1])).forEach(b=>add(lab,"mappable block",b[0],b[1],"",""));
+    if(isHg){
+      (d.geve||[]).filter(o=>inw(o.hg38_orf_start,o.hg38_orf_end)).forEach(o=>add("gEVE ORFs",o.geve_orf_id,o.hg38_orf_start,o.hg38_orf_end,o.orf_strand,"ORF class "+o.orf_class));
+      (d.domains||[]).filter(o=>inw(o.hg38_start,o.hg38_end)).forEach(o=>add("HERVarium domains",o.gene||o.domain_desc,o.hg38_start,o.hg38_end,o.strand,[o.domain_desc,o.status,"score "+o.domain_score].filter(Boolean).join("; ")));
+      (d.hervarium||[]).filter(e=>e.kind==="LTR"&&inw(e.start,e.end)).forEach(e=>{ add("HERVarium LTRs",e.id,e.start,e.end,e.strand,[e.role,"U3/R/U5 "+e.st].filter(Boolean).join("; "));
+        [["U3",e.u3_start,e.u3_end],["R",e.r_start,e.r_end],["U5",e.u5_start,e.u5_end]].forEach(z=>{ if(z[1]!=null&&z[2]!=null) add("HERVarium LTRs",e.id+" "+z[0],z[1],z[2],e.strand,z[0]); }); });
+    }
+    const hp=isHg?"hg38_":"t2t_";
+    (d.hvorf||[]).filter(o=>o[hp+"start"]!=null&&o[hp+"chrom"]===co.chrom&&inw(o[hp+"start"],o[hp+"end"])).forEach(o=>add("HERVOminer ORFs >= 81 aa",o.orf_id,o[hp+"start"],o[hp+"end"],o[hp+"strand"],
+      o.aa_len+" aa; placed "+(o[hp+"placement"]==="exact"?"by exact sequence match":"on the most similar stretch")+(isHg&&o.geve_orf_id?"; identical to gEVE "+o.geve_orf_id:"")));
+    gmGenes((d.gm||{})[asm]||[],w0,w1).forEach(g=>{ add("genes ("+(isHg?"GENCODE v50":"RefSeq hs1")+")",g.k,g.a,g.b,g.strand,g.n+" transcript"+(g.n>1?"s":"")+" in window; gene span");
+      g.mg.forEach(e=>add("genes ("+(isHg?"GENCODE v50":"RefSeq hs1")+")",g.k+" exon",e[0],e[1],g.strand,"merged exon, clipped to transcripts in the window")); });
+    const cc=d.cc||{}; if(cc.seg&&cc.asm===asm) cc.seg.filter(g=>inw(co.start+g[0],co.start+g[0]+g[1])).forEach(g=>add("CCLE 31-mer","locus-unique 31-mer segment",co.start+g[0],co.start+g[0]+g[1],"",g[2]+" CCLE lines detecting (k-mer count >= 2)"));
+    if(isHg){ let src=null; if(d.arcs&&d.arcs.jx&&d.arcs.jx.length) src=d.arcs; else if(d.pjx&&d.pjx.w&&d.pjx.w.length&&typeof pjxDecode==="function") src=pjxDecode(d.pjx,co);
+      if(src) src.jx.filter(j=>inw(j[0],j[1])).forEach(j=>add("junctions (Snaptron srav3h)","junction",j[0],j[1],j[3],Number(j[2]).toLocaleString("en-US").replace(/,/g,"")+" samples"+(src.packed?" (log-quantised, about +/-4%)":""))); }
+    out.push(...head("features drawn on the locus map, "+asm+" "+co.chrom+":"+(w0+1)+"-"+w1+" (locus +/- 1 kb)",["start is 0-based, end is exclusive (BED convention). Features are those in the map window; junctions are the drawn subset."]),
+      line(["lane","name","chrom","start","end","strand","detail"]));
+    rows.forEach(r=>out.push(line(r)));
+  } else return null;
+  return {name:d.combined_id+"_"+name+".tsv",text:out.join("\n")+"\n"};
+}
+function downloadTSV(d,asm,kind){
+  const t=tsvText(d,asm,kind); if(!t) return;
+  saveBlob(new Blob([t.text],{type:"text/tab-separated-values"}),t.name);
+}
 /* Shared download helper (tests replace window.__saveBlob). */
 function saveBlob(blob,name){
   if(typeof window!=="undefined"&&window.__saveBlob) return window.__saveBlob(blob,name);
@@ -482,14 +735,14 @@ function exportSVG(d,asm){
     hvo:"HERVOminer ORF \u2265 81 aa (solid = gEVE)",gene:"gene exon / intron",
     cage:"FANTOM5 CAGE peak",["rep-line"]:"LINE",["rep-sine"]:"SINE",["rep-dna"]:"DNA",["rep-other"]:"other TE",
     ["rep-low"]:"simple / low complexity",map1:"uniquely mappable",ccle:"CCLE 31-mer segment"};
-  let lx=110, ly=0, leg="";
+  let lx=MAPL, ly=0, leg="";
   for(const k of Object.keys(LEG)){ if(!used.includes(k)) continue;
     const t=LEG[k], w=18+t.length*6.2;
-    if(lx+w>W-10){ lx=110; ly+=16; }
+    if(lx+w>W-10){ lx=MAPL; ly+=16; }
     leg+='<rect x="'+lx+'" y="'+(ly+2)+'" width="10" height="10" rx="2" fill="'+rv("var(--"+k+")")+'"/>'+
       '<text x="'+(lx+14)+'" y="'+(ly+11)+'" font-size="10" fill="#444">'+esc(t)+"</text>"; lx+=w+10; }
   if(used.includes("jx")){ ly+=16;
-    leg+='<text x="110" y="'+(ly+11)+'" font-size="10" fill="#444">junction samples</text>'+
+    leg+='<text x="'+MAPL+'" y="'+(ly+11)+'" font-size="10" fill="#444">junction samples</text>'+
       [[10,"10"],[1000,"1k"],[100000,"100k"]].map((p,i)=>'<line x1="'+(215+i*52)+'" y1="'+(ly+7)+'" x2="'+(235+i*52)+
       '" y2="'+(ly+7)+'" stroke="'+rv("var(--jx-within)")+'" stroke-width="'+jxW(p[0]).toFixed(2)+'" opacity="'+
       jxO(p[0]).toFixed(2)+'" stroke-linecap="round"/><text x="'+(239+i*52)+'" y="'+(ly+11)+'" font-size="9" fill="#666">'+
@@ -533,7 +786,7 @@ function absentPanel(d,dfb){
   if(!d.geve.length) miss.push(["gEVE ORFs",why("geve")]);
   if(!d.domains.length) miss.push(["HERVarium domains",why("hervarium")]);
   if(!d.genes.length) miss.push(["overlapping genes",why("gene")]);
-  if(!d.segments.length) miss.push(["stored segments","only Telescope-origin loci carry them"]);
+  if(!d.segments.length) miss.push(["hg38 segments","the locus has no hg38 coordinates"]);
   const nb=d.eb===2?'<div class="note" style="font-style:normal"><b>HERVarium-only locus</b> (entry batch 2): a HERVarium v5 element that '+
     "overlapped no earlier catalog locus (D41). Not screened by: "+[...ns].map(k=>LAYER_NAME[k]||k).join(", ")+
     "; nor by TU membership or the CCLE / TCGA / GTEx / ENCODE / Blueprint expression layers.</div>":"";
@@ -606,11 +859,19 @@ function lineageKv(d,g){
   }
   return out;
 }
+/* Column headers for the annotation tables: the catalog's column names in plain words.
+   Positions in these tables are the stored values (0-based start, end-exclusive). */
+const COL_LABEL={geve_orf_id:"gEVE ORF",orf_class:"ORF class",hg38_chrom:"chrom",hg38_orf_start:"start (hg38, 0-based)",hg38_orf_end:"end",
+  orf_strand:"strand",domain_desc:"domain",domain_score:"score",hg38_start:"start (hg38, 0-based)",hg38_end:"end",genome:"assembly",
+  ref_gene_name:"gene",ref_gene_id:"gene ID",gene_type:"gene type",overlap_type:"overlap",overlap_bp:"overlap (bp)",
+  exon_overlap_bp:"exonic overlap (bp)",n_transcripts:"transcripts",seg_index:"segment",segment_class:"class",repName:"repeat name",
+  repFamily:"repeat family",repClass:"repeat class",start:"start (0-based)",span:"length (bp)",rmsk_sw_score:"RepeatMasker SW score"};
+const COL_WORDS=new Set(["gene_type","overlap_type"]);
 function tbl(rows,cols){
   if(!rows||!rows.length)return '<div class="note">none</div>';
   const use=cols.filter(c=>rows.some(r=>r[c]!=null&&r[c]!==""));
-  return "<table><tr>"+use.map(c=>"<th>"+esc(c)+"</th>").join("")+"</tr>"+
-    rows.map(r=>"<tr>"+use.map(c=>'<td class="'+(typeof r[c]==="number"?"mono":"")+'">'+fmt(r[c])+"</td>").join("")+"</tr>").join("")+"</table>";
+  return "<table><tr>"+use.map(c=>"<th>"+esc(COL_LABEL[c]||c)+"</th>").join("")+"</tr>"+
+    rows.map(r=>"<tr>"+use.map(c=>'<td class="'+(typeof r[c]==="number"?"mono":"")+'">'+fmt(COL_WORDS.has(c)?hum(r[c]):r[c])+"</td>").join("")+"</tr>").join("")+"</table>";
 }
 /* Subramanian 2011 HML-2 provirus detail. Only 87 of 39,733 loci carry this, so
    the panel is omitted entirely rather than rendered empty. Coordinates shown are
@@ -630,11 +891,13 @@ function tbl(rows,cols){
    sits on loci we group as MER4B and none of them carry a MER21* RepBase name. That
    is a real vocabulary difference, not a mapping error, and hiding it would let a
    user read "MER21" as our MER21. */
+// ERV Navigator's own URL form: the identifier percent-encoded, parentheses included.
+const navUrl=id=>"https://ervnavigator.fredhutch.org/locus/"+encodeURIComponent(id).replace(/\(/g,"%28").replace(/\)/g,"%29");
 function missillacPanel(rows){
   if(!rows||!rows.length)return "";
   const pri=rows.find(r=>r.is_primary)||rows[0];
   const navlink=r=>{
-    const u=r.url||("https://ervnavigator.fredhutch.org/locus/"+encodeURIComponent(r.missillac_id));
+    const u=r.url||navUrl(r.missillac_id);
     return '<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(r.missillac_id)+" \u2197</a>";
   };
   const disagree=pri.name_agrees_with_coords===0&&pri.name_match_level!=="numeric_expansion";
@@ -720,6 +983,28 @@ function aliasTable(al){
 }
 
 // ---- locus graphic ----
+// Label gutter of the locus map, in SVG units. .covctl in index.html is indented by the same amount.
+const MAPL=128;
+/* Gene lane input: one entry per gene {k, n transcripts, a, b, strand, mg = merged
+   exons in the window}. Layout 2 ships exactly that, packed by build_dashboard._gm_pack
+   as [name, n, txStart, txEnd, strand, [flat exon intervals]]; layout 1 shipped every
+   transcript, collapsed here by the same rule. */
+function gmGenes(gm,w0,w1){
+  if(gm.length&&Array.isArray(gm[0])) return gm.map(e=>{const mg=[];
+    for(let i=0;i<e[5].length;i+=2) mg.push([e[5][i],e[5][i+1]]);
+    return {k:e[0],n:e[1],a:e[2],b:e[3],strand:e[4],mg};});
+  const byGene=new Map();
+  gm.filter(t=>t.txEnd>w0&&t.txStart<w1).forEach(t=>{const k=t.name2||t.name;
+    if(!byGene.has(k))byGene.set(k,{k,n:0,a:t.txStart,b:t.txEnd,strand:t.strand,ex:[]});
+    const g=byGene.get(k); g.n++; g.a=Math.min(g.a,t.txStart); g.b=Math.max(g.b,t.txEnd);
+    const es=t.exonStarts||[],ee=t.exonEnds||[];
+    for(let i=0;i<es.length;i++) if(ee[i]>w0&&es[i]<w1) g.ex.push([+es[i],+ee[i]]);});
+  return [...byGene.values()].map(g=>{
+    g.ex.sort((p,q)=>p[0]-q[0]);
+    const mg=[]; for(const e of g.ex){const l=mg[mg.length-1];
+      if(l&&e[0]<=l[1])l[1]=Math.max(l[1],e[1]);else mg.push([e[0],e[1]]);}
+    g.mg=mg; return g;});
+}
 async function drawLocus(d,co,asm){
   // called unawaited from render(); a throw here would otherwise be an invisible
   // rejected promise, leaving the "rendering…" placeholder on screen forever.
@@ -746,9 +1031,9 @@ async function drawLocus_(d,co,asm){
   const isHg=asm==="hg38";
   // L is the lane-label gutter. At L=62 only ~9 monospace chars fit and 81% of
   // gene labels were clipped (e.g. "LOC124905662" rendered as "OC124905662").
-  // L=110 holds ~18; longer labels are ellipsised by laneLabel() with the full
+  // L=128 holds ~19 at the 10.5 px label size; longer labels are ellipsised by laneLabel() with the full
   // string in a <title>, so nothing is silently truncated.
-  const PAD=1000, W=1080, L=110, R=14;
+  const PAD=1000, W=1080, L=MAPL, R=14;
   const w0=Math.max(0,co.start-PAD), w1=co.end+PAD, span=w1-w0;
   const x=p=>L+(Math.min(Math.max(p,w0),w1)-w0)/span*(W-L-R);
   // gEVE ORFs and HERVarium domains are stored in hg38 coordinates ONLY, so they
@@ -756,10 +1041,11 @@ async function drawLocus_(d,co,asm){
   // the bundle is assembly-keyed, hg38 from GENCODE and t2t from hs1 RefSeq, each
   // in its own assembly's coordinates. Index by assembly, never assume hg38.
   const GA=((typeof LOOKUP!=="undefined"&&LOOKUP)||{}).gene_assemblies||[];
-  const tx=((d.gm||{})[asm]||[]).filter(t=>t.txEnd>w0&&t.txStart<w1);
+  const gmodels=gmGenes((d.gm||{})[asm]||[],w0,w1);
   const lanes=[], USED=new Set();
   const reps=(d.repeats||[]).filter(r=>r.assembly===asm&&r.end>w0&&r.start<w1);
-  // locus_segment is Telescope-derived and hg38-only. On t2t the LTR-class rows from
+  // `segments` are the hg38 bases the locus owns (D48; Telescope features for Telescope loci,
+  // RepeatMasker LTR-class elements otherwise). On t2t the LTR-class rows from
   // locus_repeat stand in, which is why the lane label names its source.
   const segs=isHg?(d.segments||[]).filter(s=>s.end>w0&&s.start<w1):[];
   lanes.push({label:isHg?"segments":"locus extent",h:16,draw:()=>segs.length?segs.map(s=>{
@@ -770,26 +1056,26 @@ async function drawLocus_(d,co,asm){
         ["position",co.chrom+":"+ivx(s.start,s.end)+" ("+esc(s.strand||"")+")"],["length",bpx(s.end-s.start)],
         ["RepeatMasker SW score",s.rmsk_sw_score]],c);
       return rect(a,0,b-a,13,c,tp)+
-        lbl((a+b)/2,9.5,txt,"var(--on-strong)",8,"middle",fits(b-a,txt,8));}).join("")
+        lbl((a+b)/2,9.7,txt,"var(--on-strong)",9,"middle",fits(b-a,txt,9));}).join("")
     :rect(x(co.start),0,x(co.end)-x(co.start),13,"var(--rep-low)",
        card("locus extent",[["position",co.chrom+":"+ivx(co.start,co.end)],["length",bpx(co.end-co.start)],
          ["note",isHg?"no segments stored for this locus":"segments are hg38-only"]]))+
      lbl((x(co.start)+x(co.end))/2,9.5,
          isHg?"locus extent (no segments stored)":"locus extent (t2t; segments are hg38-only)",
-         "var(--on-rep)",8,"middle",true)});
+         "var(--on-rep)",9,"middle",true)});
   // RepeatMasker lane: both assemblies. Labels are length-aware and separated, same
   // rule as the domain lane -- a 300 bp Alu is ~4 px wide at this scale.
   if(reps.length)lanes.push({label:"RepeatMasker",h:15,draw:()=>{
       let last=-1e9;
       return reps.slice().sort((p,q)=>p.start-q.start).map(r=>{
         const a=x(r.start),b=x(r.end),txt=r.rep_name||"", role=repRole(r), low=role==="rep-low"; USED.add(role);
-        const ok=!low&&fits(b-a,txt,7)&&a-last>3; if(ok)last=b;
+        const ok=!low&&fits(b-a,txt,8)&&a-last>3; if(ok)last=b;
         const tp=card(txt||"repeat",[["class / family",[r.rep_class,r.rep_family].filter(Boolean).join(" / ")],
           ["position",co.chrom+":"+ivx(r.start,r.end)+" ("+(r.strand||"")+")"],["length",bpx(r.end-r.start)],
           ["divergence",r.pct_div==null?null:r.pct_div+"% from consensus"],
           ["shared by",r.n_loci>1?r.n_loci+" catalog loci":null]],"var(--"+role+")");
         return rect(a,low?3:0,Math.max(1.5,b-a),low?6:12,"var(--"+role+")",tp)+
-               lbl((a+b)/2,8.7,txt,STRONG.has(role)?"var(--on-strong)":"var(--on-rep)",7,"middle",ok);
+               lbl((a+b)/2,9,txt,STRONG.has(role)?"var(--on-strong)":"var(--on-rep)",8,"middle",ok);
       }).join("");}});
   // Mappability lanes. Two resources on hg38 (pm151 Panmask "easy" at 151bp, and
   // Umap k100 single-read uniqueness); on t2t only Umap, because Panmask has no
@@ -809,7 +1095,7 @@ async function drawLocus_(d,co,asm){
     if(st.no_data){
       lanes.push({label:lab,h:12,draw:()=>rect(x(w0),3,x(w1)-x(w0),7,"var(--maptrack)")+
         lbl((x(w0)+x(w1))/2,9,"no data \u2014 contig not covered by this resource",
-            "var(--mut)",7,"middle",true)});
+            "var(--mut)",8.5,"middle",true)});
       return;
     }
     const segs2=(bl||[]).filter(b=>b[1]>w0&&b[0]<w1); USED.add("map1");
@@ -865,7 +1151,7 @@ async function drawLocus_(d,co,asm){
         ["length",bpx(o.hg38_orf_end-o.hg38_orf_start)+" \u00b7 "+Math.floor((o.hg38_orf_end-o.hg38_orf_start)/3)+" codons"],
         ...covOrfRows(d,co,o.hg38_orf_start,o.hg38_orf_end)],"var(--orf)");
       return arrow(a,b,12,"var(--orf)",o.orf_strand,tp)+
-        lbl((a+b)/2,9,txt,"var(--on-strong)",8,"middle",fits(b-a,txt,8));}).join("")});
+        lbl((a+b)/2,9.3,txt,"var(--on-strong)",9,"middle",fits(b-a,txt,9));}).join("")});
   const doms=isHg?(d.domains||[]).filter(o=>o.hg38_end>w0&&o.hg38_start<w1):[];
   if(doms.length)USED.add("dom");
   if(doms.length)lanes.push({label:"HERVarium domains",h:15,draw:()=>{
@@ -873,11 +1159,11 @@ async function drawLocus_(d,co,asm){
       let last=-1e9;
       return doms.slice().sort((p,q)=>p.hg38_start-q.hg38_start).map(o=>{
         const a=x(o.hg38_start),b=x(o.hg38_end),txt=o.gene||o.domain_desc||"";
-        const ok=fits(b-a,txt,8)&&a-last>3; if(ok)last=b;
+        const ok=fits(b-a,txt,9)&&a-last>3; if(ok)last=b;
         const tp=card((o.gene||"domain")+(o.domain_desc?" \u2014 "+o.domain_desc:""),[["element",o.element],
           ["status",o.status],["score",o.domain_score],
           ["position","hg38:"+ivx(o.hg38_start,o.hg38_end)],["length",bpx(o.hg38_end-o.hg38_start)]],"var(--dom)");
-        return rect(a,0,Math.max(2,b-a),12,"var(--dom)",tp)+lbl((a+b)/2,8.7,txt,"var(--on-strong)",8,"middle",ok);
+        return rect(a,0,Math.max(2,b-a),12,"var(--dom)",tp)+lbl((a+b)/2,9.3,txt,"var(--on-strong)",9,"middle",ok);
       }).join("");}});
   // HERVarium LTRs with U3 / R / U5 (GRCh38 only). U3 is the transcript 5' part, so it sits on
   // the right on the minus strand; the segment coordinates are HERVarium's own.
@@ -897,7 +1183,7 @@ async function drawLocus_(d,co,asm){
         '<rect x="'+a+'" y="1" width="'+Math.max(1,b-a)+'" height="10" fill="none" stroke="var(--rr)" stroke-width="0.8"'+
         (e.st==="LOW_CONF"?' stroke-dasharray="2,1.5"':"")+'/>';
       segs.forEach(z=>{const sa=x(Math.max(z[1],w0)),sb=x(Math.min(z[2],w1));
-        if(sb>sa) g+='<rect x="'+sa+'" y="1" width="'+(sb-sa)+'" height="10" fill="'+z[3]+'"/>'+lbl((sa+sb)/2,9,z[0],z[0]==="R"?"var(--on-strong)":"#1b1b1f",7.5,"middle",fits(sb-sa,z[0],7.5));});
+        if(sb>sa) g+='<rect x="'+sa+'" y="1" width="'+(sb-sa)+'" height="10" fill="'+z[3]+'"/>'+lbl((sa+sb)/2,9,z[0],z[0]==="R"?"var(--on-strong)":"#1b1b1f",8.5,"middle",fits(sb-sa,z[0],8.5));});
       [e.pbs_start,e.ppt_start].forEach((p_,i)=>{ if(p_!=null&&p_>=w0&&p_<=w1){const X=x(p_);
         g+='<path d="M'+(X-3)+' 13.5 L'+(X+3)+' 13.5 L'+X+' 10.5 Z" fill="#1b1b1f"><title>'+(i?"PPT":"PBS")+'</title></path>';}});
       return g+"</g>";}).join("")});
@@ -906,7 +1192,7 @@ async function drawLocus_(d,co,asm){
   const hp=isHg?"hg38_":"t2t_";
   const hv=(d.hvorf||[]).filter(o=>o[hp+"start"]!=null&&o[hp+"chrom"]===co.chrom&&o[hp+"end"]>w0&&o[hp+"start"]<w1);
   if(hv.length){ USED.add("hvo");
-    lanes.push({label:"HERVOminer ORFs \u2265 81 aa",h:41,draw:()=>hv.map(o=>{
+    lanes.push({label:"HERVOminer ORFs",sub:"\u2265 81 aa",h:41,draw:()=>hv.map(o=>{
       const s0=o[hp+"start"],s1=o[hp+"end"],st=o[hp+"strand"],fr=st==="+"?s0%3:s1%3,row=(st==="+"?0:3)+fr,y0=row*7;
       const a=x(Math.max(s0,w0)),b=x(Math.min(s1,w1));
       const tp=card(o.orf_id,[["length",o.aa_len+" aa"],["position",co.chrom+":"+ivx(s0,s1)+" ("+st+")"],
@@ -918,16 +1204,8 @@ async function drawLocus_(d,co,asm){
   }
   // collapse isoforms to one lane per gene: union of exons, widest tx extent.
   // Drawing 6 lanes of the same gene wastes vertical space and hides whether any exon is in view.
-  const byGene=new Map();
-  tx.forEach(t=>{const k=t.name2||t.name;
-    if(!byGene.has(k))byGene.set(k,{k,n:0,a:t.txStart,b:t.txEnd,strand:t.strand,ex:[]});
-    const g=byGene.get(k); g.n++; g.a=Math.min(g.a,t.txStart); g.b=Math.max(g.b,t.txEnd);
-    const es=t.exonStarts||[],ee=t.exonEnds||[];
-    for(let i=0;i<es.length;i++) if(ee[i]>w0&&es[i]<w1) g.ex.push([es[i],ee[i]]);});
-  [...byGene.values()].sort((p,q)=>p.a-q.a).forEach(g=>{
-    g.ex.sort((p,q)=>p[0]-q[0]);
-    const mg=[]; for(const e of g.ex){const l=mg[mg.length-1];
-      if(l&&e[0]<=l[1])l[1]=Math.max(l[1],e[1]);else mg.push([e[0],e[1]]);}
+  gmodels.slice().sort((p,q)=>p.a-q.a).forEach(g=>{
+    const mg=g.mg;
     USED.add("gene");
     const gov=(d.genes||[]).find(h=>h.genome===asm&&(h.ref_gene_name===g.k||h.ref_gene_id===g.k))||{};
     const unnamed=/^ENSG\d+/.test(g.k);
@@ -944,11 +1222,11 @@ async function drawLocus_(d,co,asm){
       let s='<g'+tipA(tp)+'>'+rect(x(g.a),0,Math.max(1,x(g.b)-x(g.a)),12,"transparent")+
         line(x(g.a),6,x(g.b),6,"var(--gene)",1);
       for(const [a,b] of mg) s+=rect(x(a),1.5,Math.max(1.5,x(b)-x(a)),9,"var(--gene)");
-      s+="</g>"+lbl(x(Math.min(g.b,w1))+4,9.5,g.strand,"var(--mut)",9,"start",true);
+      s+="</g>"+lbl(x(Math.min(g.b,w1))+4,9.5,g.strand,"var(--mut)",10,"start",true);
       // y=9.5 put this ON the gene line at y=6, which struck through the text.
       // 13 clears the line and still sits inside the 15px lane.
       if(!mg.length) s+=lbl((x(Math.max(g.a,w0))+x(Math.min(g.b,w1)))/2,13,
-          "intron only \u2014 no exon in window","var(--gene)",7.5,"middle",true);
+          "intron only \u2014 no exon in window","var(--gene)",8.5,"middle",true);
       return s;}});});
   // Snaptron arc lane, hg38 only (srav3h has no t2t build). Unshifted so arcs sit
   // above the feature lanes they span, matching the TU view's layout.
@@ -1070,8 +1348,8 @@ async function drawLocus_(d,co,asm){
   let y=0,body="";
   lanes.forEach(ln=>{
     body+='<g transform="translate(0,'+y+')">'+
-      laneLabel(L-6,10,ln.label,"var(--mut)",9.5,L-6)+
-      (ln.sub?lbl(L-6,23,ln.sub,"var(--mut)",8.5,"end",true):"")+ln.draw()+"</g>";
+      laneLabel(L-6,10,ln.label,"var(--mut)",10.5,L-6)+
+      (ln.sub?lbl(L-6,23,ln.sub,"var(--mut)",9.5,"end",true):"")+ln.draw()+"</g>";
     y+=ln.h+5;});
   // locus extent guides + axis
   const guides=line(x(co.start),0,x(co.start),y,"var(--guide)",1,"2,2")+
@@ -1083,38 +1361,38 @@ async function drawLocus_(d,co,asm){
   for(let i=0;i<=ticks;i++){const p=w0+(w1-w0)*i/ticks;
     const an=i===0?"start":(i===ticks?"end":"middle");
     axis+=line(x(p),y+4,x(p),y+8,"var(--axis)",1)+
-      lbl(x(p),y+19,Math.round(p).toLocaleString(),"var(--mut)",9,an,true);}
-  axis+=lbl(L,y+33,asm+" "+co.chrom+"  ·  window "+(w1-w0).toLocaleString()+" bp  ·  locus "+
-        (co.end-co.start).toLocaleString()+" bp","var(--mut)",9.5,"start",true);
+      lbl(x(p),y+20,Math.round(p).toLocaleString(),"var(--mut)",10,an,true);}
+  axis+=lbl(L,y+35,asm+" "+co.chrom+"  ·  window "+(w1-w0).toLocaleString()+" bp  ·  locus "+
+        (co.end-co.start).toLocaleString()+" bp","var(--mut)",10.5,"start",true);
   const LEG=[["ltr","ERV LTR"],["int","ERV internal"],["orf","gEVE ORF"],["dom","HERVarium domain"],
     ["u3","U3"],["rr","R"],["u5","U5 (HERVarium; dashed outline = low-confidence call)"],
     ["hvo","HERVOminer ORF \u2265 81 aa (solid = identical gEVE ORF; dashed = placed by similarity)"],
     ["gene","gene exon / intron"],["cage","FANTOM5 CAGE peak (open = antisense)"],["rep-line","LINE"],
     ["rep-sine","SINE"],["rep-dna","DNA"],["rep-other","other TE"],["rep-low","simple / low complexity"],
     ["map1","uniquely mappable"],["ccle","CCLE 31-mer segment (darker = detected in more cell lines)"],
-    ["cat1","recount3 region coverage (darker = covered in more tissue / tumour groups)"]];
+    ["cat1","recount3 coverage breadth (darker = covered in more of that row\u2019s tissue / tumour groups; number in brackets = groups in the row)"]];
   $("gfx").dataset.used=[...USED].join(",");
   const legend='<div class="lg">'+LEG.filter(l=>USED.has(l[0])).map(l=>'<span><i style="background:var(--'+l[0]+')'+
     (l[0]==="rep-low"?";height:6px;vertical-align:1px":"")+'"></i>'+esc(l[1])+"</span>").join("")+
-    (USED.has("ccle")?'<span class="jxkey">CCLE lines detecting <svg width="178" height="12">'+
-      [[0,"0"],[1,"1"],[10,"10"],[100,"100"],[((LOOKUP||{}).ccle||{}).n_lines_kmer||1019,"all"]].map((p,i)=>'<rect x="'+(i*36+1)+'" y="1" width="14" height="10" rx="1.5" '+
+    (USED.has("ccle")?'<span class="jxkey">CCLE lines detecting <svg width="196" height="13">'+
+      [[0,"0"],[1,"1"],[10,"10"],[100,"100"],[((LOOKUP||{}).ccle||{}).n_lines_kmer||1019,"all"]].map((p,i)=>'<rect x="'+(i*40+1)+'" y="1" width="14" height="11" rx="1.5" '+
         'fill="var(--ccle)" fill-opacity="'+ccO(p[0],((LOOKUP||{}).ccle||{}).n_lines_kmer||((LOOKUP||{}).ccle||{}).n_lines||1019).toFixed(2)+'" stroke="var(--ccle)" stroke-width="0.6"/>'+
-        '<text x="'+(i*36+18)+'" y="10" font-size="9" fill="var(--mut)">'+p[1]+"</text>").join("")+"</svg></span>":"")+
+        '<text x="'+(i*40+18)+'" y="11" font-size="10.5" fill="var(--mut)">'+p[1]+"</text>").join("")+"</svg></span>":"")+
     (USED.has("covheat")?'<span class="jxkey">mean coverage per base per 10\u2079 aligned bases '+covKey()+'</span>':"")+
     (USED.has("covhatch")?'<span class="jxkey"><svg width="22" height="12">'+COV_HATCH+'<rect x="1" y="1" width="20" height="10" fill="#de4968"/><rect x="1" y="1" width="20" height="10" fill="url(#covhatch)"/></svg> '+
       'under half the bin has unique 100-mers (Umap): reads there are shared with other copies, so dips and spikes follow the aligner, not expression</span>':"")+
-    (USED.has("jx")?'<span class="jxkey">junction samples <svg width="150" height="12">'+
-      [[10,"10"],[1000,"1k"],[100000,"100k"]].map((p,i)=>'<line x1="'+(i*50+2)+'" y1="6" x2="'+(i*50+22)+
+    (USED.has("jx")?'<span class="jxkey">junction samples <svg width="168" height="13">'+
+      [[10,"10"],[1000,"1k"],[100000,"100k"]].map((p,i)=>'<line x1="'+(i*56+2)+'" y1="6" x2="'+(i*56+22)+
         '" y2="6" stroke="var(--jx-within)" stroke-width="'+jxW(p[0]).toFixed(2)+'" opacity="'+jxO(p[0]).toFixed(2)+
-        '" stroke-linecap="round"/><text x="'+(i*50+26)+'" y="10" font-size="9" fill="var(--mut)">'+p[1]+"</text>").join("")+
+        '" stroke-linecap="round"/><text x="'+(i*56+26)+'" y="11" font-size="10.5" fill="var(--mut)">'+p[1]+"</text>").join("")+
       '</svg> \u00b7 above = sense, below = antisense \u00b7 dashed = no mappable anchor</span>':"")+
     '<span style="margin-left:auto">hover for details \u00b7 click to pin and copy</span></div>';
-  $("gfx").innerHTML=(isHg&&d.cov&&d.cv&&d.pf?covCtl(d):"")+'<svg viewBox="0 -6 '+W+" "+(y+48)+'" width="'+W+'">'+guides+body+axis+"</svg>"+legend+
-    (tx.length?"":'<div class="note">no '+(isHg?"GENCODE":"RefSeq")+
+  $("gfx").innerHTML=(isHg&&d.cov&&d.cv&&d.pf?covCtl(d):"")+'<svg viewBox="0 -6 '+W+" "+(y+50)+'" width="'+W+'">'+guides+body+axis+"</svg>"+legend+
+    (gmodels.length?"":'<div class="note">no '+(isHg?"GENCODE":"RefSeq")+
       ' transcript in this window'+
       (GA.includes(asm)?"":" (no "+asm+" gene models in bundle)")+"</div>")+
-    (d.segments.length?"":'<div class="note">This locus has no stored RepeatMasker segments — '+
-      "only telescope-origin loci carry them. Bar shows the merged locus extent.</div>")+
+    (d.segments.length?"":'<div class="note">No owned segments are drawn on this assembly\u2019s map; '+
+      "the bar shows the locus extent.</div>")+
     // Legend for the arc lane. The classes and the quantisation are only meaningful
     // for the packed source, so the caption states which source drew the lane and
     // how many junctions were kept out of how many were considered.
@@ -1218,7 +1496,7 @@ function geneExprPanel(d){
 function rnaAtlasPanel(d){
   const m=(LOOKUP||{}).rna_atlas, T=((LOOKUP||{}).tissue||{});
   if(!m) return "";
-  const head='<div class="panel"><h2>RNA Atlas \u2014 Telescope TPM, 295 samples \u00d7 polyA and total RNA</h2>'+
+  const head='<div class="panel"><h2>RNA Atlas \u2014 Telescope TPM, 295 samples \u00d7 polyA and total RNA<span class="dlbtns" id="radl"></span></h2>'+
     '<div class="note" style="margin:-2px 0 6px">RetroelementDB quantification (Russ &amp; Iordanskiy, <i>Mobile DNA</i> 2025) of the RNA Atlas (GSE138734)</div>';
   const isTel=(d.aliases||[]).some(a=>a.alias_type==="telescope_id");
   if(!isTel) return head+'<div class="note">not a Telescope locus \u2014 the RNA Atlas quantification covers Telescope loci only.</div></div>';
@@ -1230,12 +1508,12 @@ function rnaAtlasPanel(d){
     const o=(rows[k].sm[l[1]]=rows[k].sm[l[1]]||[null,null]); o[l[4]]=val[i]||0; });
   const gd=(d.ts||{}).d, TG=T.groups||[];
   const fmt1=v=>v==null?"\u2014":v>=100?Math.round(v).toLocaleString():v>=10?v.toFixed(0):v>=1?v.toFixed(1):v>0?v.toFixed(2):"0";
-  const RH=15, LW=150, BW=150, W_=LW+BW+86;
+  const RH=17, LW=172, BW=150, W_=LW+BW+96;
   const col=(types)=>{
     let y=0, out="";
     types.forEach(([ty,tl])=>{
       const rs=Object.values(rows).filter(r=>r.t===ty).sort((a,b)=>a.s.localeCompare(b.s)); if(!rs.length) return;
-      out+='<text x="0" y="'+(y+11)+'" font-size="10" font-weight="600" fill="var(--ink)">'+esc(tl)+'</text>'; y+=16;
+      out+='<text x="0" y="'+(y+12)+'" font-size="11.5" font-weight="600" fill="var(--ink)">'+esc(tl)+'</text>'; y+=18;
       rs.forEach(r=>{
         const sm=Object.entries(r.sm), N=sm.length;
         const na=sm.filter(([,v])=>v[0]!=null).length, nt=sm.filter(([,v])=>v[1]!=null).length;
@@ -1251,22 +1529,23 @@ function rnaAtlasPanel(d){
           ...(gl.length?[["matched GTEx coverage (detected)",gl.join("; ")]]:[])],"var(--cat1)");
         const xa=v=>LW+BW*v;
         out+='<g'+tipA(tp)+'><rect x="0" y="'+y+'" width="'+W_+'" height="'+RH+'" fill="transparent"/>'+
-          '<text x="'+(LW-6)+'" y="'+(y+10.5)+'" font-size="9.5" text-anchor="end" fill="var(--mut)">'+esc(r.s)+' ('+N+')</text>'+
-          '<rect x="'+LW+'" y="'+(y+2)+'" width="'+BW+'" height="11" fill="var(--maptrack)"/>'+
-          (na?'<rect x="'+LW+'" y="'+(y+2)+'" width="'+(BW*pa/na).toFixed(1)+'" height="5" fill="var(--cat1)"/>':'')+
-          (nt?'<rect x="'+LW+'" y="'+(y+8)+'" width="'+Math.max(0,BW*pt/nt-0.6).toFixed(1)+'" height="4.4" fill="#fff" stroke="var(--cat1)" stroke-width="0.9"/>':'')+
-          (gx!=null?'<path d="M'+xa(gx).toFixed(1)+' '+(y+1)+' l3.5 6.5 l-3.5 6.5 l-3.5 -6.5 z" fill="var(--ink)" fill-opacity="0.75"/>':'')+
-          '<text x="'+(LW+BW+6)+'" y="'+(y+10.5)+'" font-size="9" fill="var(--mut)">'+pa+'/'+na+' \u00b7 '+pt+'/'+nt+'</text></g>';
+          '<text x="'+(LW-6)+'" y="'+(y+12)+'" font-size="10.5" text-anchor="end" fill="var(--mut)">'+esc(r.s)+' ('+N+')</text>'+
+          '<rect x="'+LW+'" y="'+(y+3)+'" width="'+BW+'" height="11" fill="var(--maptrack)"/>'+
+          (na?'<rect x="'+LW+'" y="'+(y+3)+'" width="'+(BW*pa/na).toFixed(1)+'" height="5" fill="var(--cat1)"/>':'')+
+          (nt?'<rect x="'+LW+'" y="'+(y+9)+'" width="'+Math.max(0,BW*pt/nt-0.6).toFixed(1)+'" height="4.4" fill="#fff" stroke="var(--cat1)" stroke-width="0.9"/>':'')+
+          (gx!=null?'<path d="M'+xa(gx).toFixed(1)+' '+(y+2)+' l3.5 6.5 l-3.5 6.5 l-3.5 -6.5 z" fill="var(--ink)" fill-opacity="0.75"/>':'')+
+          '<text x="'+(LW+BW+6)+'" y="'+(y+12)+'" font-size="10" fill="var(--mut)">'+pa+'/'+na+' \u00b7 '+pt+'/'+nt+'</text></g>';
         y+=RH+1; });
       y+=6; });
     return '<svg class="rachart" viewBox="0 0 '+W_+' '+y+'" width="'+W_+'" height="'+y+'" font-family="inherit">'+out+'</svg>';
   };
-  const key='<div class="note" style="font-style:normal;margin:4px 0">'+
+  const key='<div class="note ikey" style="font-style:normal;margin:4px 0">'+
     '<svg width="22" height="10"><rect x="0" y="2" width="22" height="5" fill="var(--cat1)"/></svg> share of samples \u2265 '+m.detect_tpm+' TPM, polyA library \u00b7 '+
     '<svg width="22" height="10"><rect x="0.5" y="2" width="21" height="5" fill="#fff" stroke="var(--cat1)"/></svg> the same, total-RNA library \u00b7 '+
-    '<svg width="10" height="12"><path d="M5 0 l4 6 l-4 6 l-4 -6 z" fill="var(--ink)" fill-opacity="0.75"/></svg> recount3 coverage detection (cpb &gt; 1) in the matched GTEx tissue(s) \u00b7 '+
+    '<svg width="10" height="12"><path d="M5 0 l4 6 l-4 6 l-4 -6 z" fill="var(--ink)" fill-opacity="0.75"/></svg> recount3 coverage detection (coverage per base &gt; 1) in the matched GTEx tissue(s) \u00b7 '+
     'numbers: samples \u2265 '+m.detect_tpm+' TPM, polyA \u00b7 total. Total RNA keeps unspliced and intronic RNA, so intronic loci light up there far more than in polyA or in GTEx (polyA).</div>';
-  return head+key+'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'+col(TY.slice(0,3))+col(TY.slice(3))+"</div></div>";
+  return head.replace('<span class="dlbtns" id="radl"></span>','<span class="dlbtns">'+dlt("rna","TSV","TPM for every RNA Atlas library")+"</span>")+
+    key+'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'+col(TY.slice(0,3))+col(TY.slice(3))+"</div></div>";
 }
 
 // ---- coverage view (S28, D46) ---------------------------------------------------------
@@ -1279,8 +1558,8 @@ const COV_LINE=["#D55E00","#0072B2","#009E73","#CC79A7","#E69F00","#56B4E9","#1b
 const covV=c=>c?0.01*(Math.pow(2,c/12)-1):0;
 const covF=v=>v==null?"\u2014":v>=100?Math.round(v).toLocaleString():v>=10?v.toFixed(0):v>=1?v.toFixed(1):v>=0.01?v.toFixed(2):"<0.01";
 function covCol(v){ if(v<0.01) return null; const t=Math.min(0.999,(Math.log10(v)+2)/(Math.log10(50)+2)); return COV_RAMP[Math.floor(t*COV_RAMP.length)]; }
-function covKey(){ return '<svg width="236" height="12">'+[0.01,0.03,0.1,0.3,1,3,10,30].map((v,i)=>'<rect x="'+(i*29+1)+'" y="1" width="12" height="10" fill="'+covCol(v*1.05)+'"/>'+
-  '<text x="'+(i*29+15)+'" y="10" font-size="8.5" fill="var(--mut)">'+(v<1?String(v).replace("0.","."):v)+'</text>').join("")+"</svg>"; }
+function covKey(){ return '<svg width="268" height="13">'+[0.01,0.03,0.1,0.3,1,3,10,30].map((v,i)=>'<rect x="'+(i*33+1)+'" y="1" width="12" height="11" fill="'+covCol(v*1.05)+'"/>'+
+  '<text x="'+(i*33+15)+'" y="11" font-size="10.5" fill="var(--mut)">'+(v<1?String(v).replace("0.","."):v)+'</text>').join("")+"</svg>"; }
 function covUnr(a){ const o=[]; for(let j=0;j<a.length;j+=2) for(let k=0;k<a[j+1];k++) o.push(a[j]); return o; }
 const covAt=(d,g,i)=>covV(d.cov[g*d.cv[1]+i]);
 function covMean(d,co,g,a,b){
@@ -1315,7 +1594,7 @@ if(typeof window!=="undefined"){ window.covMode=covMode; window.covAdd=covAdd; w
 function covCtl(d){
   const TG=(LOOKUP.tissue||{}).groups||[], on=COV.mode==="cov", sel=covSel(d);
   const b=(m,t)=>'<button class="covbtn'+(COV.mode===m?' on':'')+'" onclick="covMode(\''+m+'\')">'+t+'</button>';
-  let h='<div class="covctl"><span class="k">tissue rows:</span>'+b("det","detection")+b("cov","coverage");
+  let h='<div class="covctl"><span class="k" title="What the tissue lanes at the bottom of the map show. detection: how many tissue groups cover each 100-bp bin. coverage: mean read depth per bin for all '+TG.length+' groups, with selectable line tracks.">tissue lanes on the map show:</span>'+b("det","detection")+b("cov","coverage");
   if(on){
     h+='<span class="k" style="margin-left:14px">tracks:</span>'+sel.map((g,i)=>'<span class="covchip"><i style="background:'+COV_LINE[i%8]+'"></i>'+
       esc(TG[g][1])+' <a href="javascript:void(0)" onclick="covDel('+g+')" title="remove">\u00d7</a></span>').join("")+
@@ -1347,7 +1626,7 @@ function covLanes(d,co,lanes,USED,x,w0,w1,W,L,R){
     return o; };
   lanes.push({label:"coverage \u00b7 "+G+" groups",h:Math.ceil(yy)+2,draw:()=>{
     let g="";
-    kinds.forEach(([k,nm])=>{ if(KY[k]) g+=lbl(L-6,Math.max(KY[k][0]+7,(KY[k][0]+KY[k][1])/2+3),nm,"var(--mut)",8.5,"end",true); });
+    kinds.forEach(([k,nm])=>{ if(KY[k]) g+=lbl(L-6,Math.max(KY[k][0]+7,(KY[k][0]+KY[k][1])/2+3),nm,"var(--mut)",9.5,"end",true); });
     rows.forEach(([gi,k,y0])=>{
       let runs="", i=i0;
       while(i<i1){ const c=covCol(covAt(d,gi,i)); let j=i; while(j+1<i1&&covCol(covAt(d,gi,j+1))===c) j++;
@@ -1372,7 +1651,7 @@ function covLanes(d,co,lanes,USED,x,w0,w1,W,L,R){
     let g="";
     if(nLow){ let i=i0; while(i<i1){ if(!lowU(i)){ i++; continue; } let j=i; while(j+1<i1&&lowU(j+1)) j++;
       const xa=x(Math.max(b00+100*i,w0)), xb=x(Math.min(b00+100*(j+1),w1)); g+='<rect x="'+xa.toFixed(1)+'" y="0" width="'+Math.max(0.6,xb-xa).toFixed(1)+'" height="'+TH+'" fill="url(#covhatch)" opacity="0.6"/>'; i=j+1; } }
-    for(let e=lmin;e<=lmax;e++){ const yy_=yv(Math.pow(10,e)); g+=line(L,yy_,W-R,yy_,"var(--axis)",0.4,"2,3")+lbl(W-R-2,yy_-2,e<0?String(Math.pow(10,e)).replace("0.","."):String(Math.pow(10,e)),"var(--mut)",8,"end",true); }
+    for(let e=lmin;e<=lmax;e++){ const yy_=yv(Math.pow(10,e)); g+=line(L,yy_,W-R,yy_,"var(--axis)",0.4,"2,3")+lbl(W-R-2,yy_-2,e<0?String(Math.pow(10,e)).replace("0.","."):String(Math.pow(10,e)),"var(--mut)",9.5,"end",true); }
     sel.forEach((gi,s)=>{ let p=""; for(let q=i0;q<i1;q++){ const xa=x(Math.max(b00+100*q,w0)), xb=x(Math.min(b00+100*(q+1),w1)), yy_=yv(covAt(d,gi,q));
         p+=(q===i0?"M":"L")+xa.toFixed(1)+" "+yy_.toFixed(1)+"L"+xb.toFixed(1)+" "+yy_.toFixed(1); }
       g+='<path d="'+p+'" fill="none" stroke="'+COV_LINE[s%8]+'" stroke-width="1.3"/>'; });
