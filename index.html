@@ -95,6 +95,8 @@
  .chip.warn{background:#FFF4E5;border-color:#e0b787}
  .chip.warn .m{color:#8a4b12}
  .chip.find{background:#E8F1FA;border-color:#7fa7cf} .chip.find .m{color:#1f4e79}
+ .orient{display:inline-block;margin:2px 0 6px;padding:4px 10px;border-radius:4px;font-size:12.5px;background:#F1F4F7;border:1px solid #c9d2db;color:#33404d}
+ .orient.flip{background:#FFF4E5;border-color:#e0b787;color:#5c3608} .orient b{letter-spacing:.02em}
  .escand{color:#0072B2;font-weight:600}
  .tsfind{border-left:3px solid #0072B2;background:#F2F7FC;padding:6px 9px;margin:4px 0 8px;font-size:12.5px}
  .panel.fold>h2{cursor:pointer}
@@ -220,7 +222,7 @@
 <header>
   <h1>HERV catalog browser <span id="sub">loading index…</span></h1>
   <nav class="tabs" id="tabs" aria-label="view">
-    <a href="#" data-tab="locus" class="on">Locus search</a><a href="#browse" data-tab="browse">Browse</a><a href="#batch" data-tab="batch">Batch translate</a>
+    <a href="#" data-tab="locus" class="on">Locus search</a><a href="#browse" data-tab="browse">Browse</a><a href="#batch" data-tab="batch" title="translate a list of identifiers; download their locus maps">Batch</a>
   </nav>
   <div class="searchbar">
     <select id="kspace"></select>
@@ -287,11 +289,11 @@
 <!-- /REFS -->
 
 <script>
-/*buildstamp*/const BUILD="d6817592f00b";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
+/*buildstamp*/const BUILD="7bc0fae452e4";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
 const MAXSHOW=20, IDENT_LABEL={combined_id:"combined_id (positional)",versioned_id:"versioned_id (with version)",
   telescope_id:"telescope_id",hervd_id:"HERVd ID",ervmap_id:"ERVmap ID",ervmap_alt_name:"ERVmap alt name",
   subramanian_id:"Subramanian 2011 locus (HML-2)",hml2_k_number:"HML-2 K-number (Subramanian)",
-  hml2_k_designation:"HML-2 K-designation (Subramanian)",hgnc_ervk_symbol:"HGNC ERVK symbol",hgnc_erv_symbol:"HGNC ERV gene (GENCODE v50 overlap)",hervarium_id:"HERVarium internal element",hervarium_ltr_id:"HERVarium LTR",hervominer_id:"HERVOminer locus",
+  hml2_k_designation:"HML-2 K-designation (Subramanian)",hgnc_ervk_symbol:"HGNC ERVK symbol",hml2_tandem_name:"HML-2 tandem name",hgnc_erv_symbol:"HGNC ERV gene (GENCODE v50 overlap)",hervarium_id:"HERVarium internal element",hervarium_ltr_id:"HERVarium LTR",hervominer_id:"HERVOminer locus",
   missillac_id:"Missillac ID (ERV Navigator)",rbrt_id:"RBRT ID (ERV Navigator legacy)"};
 const NAV_URL="https://ervnavigator.fredhutch.org/locus/";
 const CLASS_LABEL={dfam_int_model:"Dfam internal model",dfam_accession:"Dfam accession",repbase_name:"RepBase name"};
@@ -493,13 +495,18 @@ function renderBatch(){
       "</b> unique \u00b7 <b>"+o.na.toLocaleString()+"</b> ambiguous \u00b7 <b>"+o.nn.toLocaleString()+"</b> not found"+
       (o.over?" \u00b7 only the first 20,000 translated":"")+
       ' <button class="ucsc" id="bcopy">copy TSV</button><button class="ucsc" id="bdl">download TSV</button></div>'+
+      batchFigCtl(o)+
       '<div style="overflow-x:auto"><table class="t"><tr>'+BCOLS.map(c=>"<th>"+esc(c.replace(/_/g," "))).join("")+"</tr>"+
       o.rows.slice(0,2000).map(r=>'<tr class="'+(r.status==="not found"?"bnf":r.status.startsWith("amb")?"bamb":"")+'">'+
         BCOLS.map(c=>c==="combined_id"&&r.locus_uid?'<td class="mono"><a href="#'+esc(r.locus_uid)+'">'+esc(r[c])+"</a></td>":
           "<td"+(/_id|uid|hg38|input|string/.test(c)?' class="mono"':"")+">"+esc(r[c]==null?"":r[c])+"</td>").join("")+"</tr>").join("")+
       "</table></div>"+(o.rows.length>2000?'<div class="note">showing the first 2,000 of '+o.rows.length.toLocaleString()+
       " rows; copy or download for all</div>":""):"";
-  $("view").innerHTML='<div class="panel"><h2>Batch translate identifiers</h2>'+
+  $("view").innerHTML='<div class="panel"><h2>Batch: translate identifiers and download locus maps</h2>'+
+    '<div class="note" style="margin-bottom:6px;font-style:normal"><b>1. Translate</b> a list of identifiers from any naming system to catalog loci '+
+    "(table below; copy or download it as TSV). <b>2. Download maps</b>: once translated, the \u201cLocus maps\u201d row saves the locus-page map "+
+    "of up to "+BFIG_MAX+" of the loci as one zip of PNGs or SVGs, with detection or coverage rows, each drawn 5\u2032\u21923\u2032 along the element, "+
+    "plus a manifest TSV. Use it to scan a set (e.g. loci up in tumours) and open any locus for the interactive view.</div>"+
     '<div class="note" style="margin-bottom:6px">One identifier per line (commas, tabs and semicolons also separate). '+
     "Matching folds case and punctuation, as the search box does; a literal match wins over a folded one. An input that "+
     "names several loci gets one row per locus, marked ambiguous. Positions are hg38, 1-based. Runs in your browser; "+
@@ -509,12 +516,91 @@ function renderBatch(){
       (t[0]===BATCH.type?" selected":"")+">"+esc(t[1])+"</option>").join("")+"</select></label>"+
     '<label><input type="checkbox" id="bcol"'+(BATCH.collapse?" checked":"")+'> also allow HERV/ERV-prefix-collapsed matches '+
     "(K-10 \u2248 ERVK-10; flagged)</label>"+
-    '<button class="ucsc" id="brun" style="margin-left:auto">translate</button></div>'+tbl+"</div>";
+    '<button class="ucsc" id="brun" style="margin-left:auto">translate</button></div>'+
+    (o?"":'<div class="note">Translate a list to enable the map download.</div>')+tbl+"</div>";
   $("brun").onclick=batchRun;
+  if(o&&$("bfig")) $("bfig").onclick=batchFigures;
   if(o){ $("bdl").onclick=()=>saveBlob(new Blob([batchTSV()],{type:"text/tab-separated-values"}),"herv_batch_translation.tsv");
     $("bcopy").onclick=()=>{ const b=$("bcopy"), v=batchTSV();
       (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v):Promise.reject()).then(
         ()=>{b.textContent="copied";setTimeout(()=>b.textContent="copy TSV",1200);},()=>{b.textContent="copy failed \u2014 use download";}); }; }
+}
+/* Bulk figures (2026-10-09): the locus maps of the translated loci as one zip of SVGs or
+   PNGs, at most BFIG_MAX loci (first distinct loci in input order). Each map is drawn
+   exactly as on the locus page (drawLocus_ into an off-screen #gfx, then exportSVG), in
+   the chosen mode, oriented 5'->3' along the element. Runs in the browser; the only
+   requests are the locus shards and coverage bundles the maps need. */
+const BFIG_MAX=50;
+function batchFigLoci(o){ const seen=new Set(), out=[];
+  for(const r of o.rows){ if(!r.locus_uid||seen.has(r.locus_uid)) continue; seen.add(r.locus_uid); out.push(r); }
+  return out; }
+function batchFigCtl(o){
+  const L=batchFigLoci(o); if(!L.length) return "";
+  const n=Math.min(L.length,BFIG_MAX);
+  return '<div class="bctl" id="bfigrow" style="margin:6px 0 8px"><b style="font-size:13px" title="the locus-page map of each translated locus, as one zip">Locus maps</b>'+
+    '<label>format <select id="bffmt"><option value="png">PNG</option><option value="svg">SVG</option></select></label>'+
+    '<label>rows <select id="bfmode"><option value="det">detection</option><option value="cov">coverage (heat map + tracks)</option></select></label>'+
+    '<button class="ucsc" id="bfig">download '+n+" map"+(n>1?"s":"")+" (zip)</button>"+
+    '<span class="note" id="bfnote" style="margin:0">'+(L.length>BFIG_MAX?"first "+BFIG_MAX+" of "+L.length.toLocaleString()+
+      " distinct loci (cap); ":"")+"hg38 maps (T2T where a locus has no hg38 position)</span></div>";
+}
+// minimal ZIP writer (stored, no compression; PNG and gzip-free SVG are fine stored)
+const CRCT=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
+const crc32=u=>{ let c=0xFFFFFFFF; for(let i=0;i<u.length;i++) c=CRCT[(c^u[i])&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; };
+function makeZip(files){
+  const enc=new TextEncoder(), parts=[], cen=[]; let off=0;
+  const dt=new Date(), dosT=(dt.getHours()<<11)|(dt.getMinutes()<<5)|(dt.getSeconds()>>1), dosD=((dt.getFullYear()-1980)<<9)|((dt.getMonth()+1)<<5)|dt.getDate();
+  for(const f of files){
+    const nm=enc.encode(f.name), data=f.data, crc=crc32(data);
+    const h=new DataView(new ArrayBuffer(30)); h.setUint32(0,0x04034b50,true); h.setUint16(4,20,true); h.setUint16(6,0x0800,true);
+    h.setUint16(10,dosT,true); h.setUint16(12,dosD,true); h.setUint32(14,crc,true); h.setUint32(18,data.length,true); h.setUint32(22,data.length,true); h.setUint16(26,nm.length,true);
+    parts.push(new Uint8Array(h.buffer),nm,data);
+    const c=new DataView(new ArrayBuffer(46)); c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true); c.setUint16(8,0x0800,true);
+    c.setUint16(12,dosT,true); c.setUint16(14,dosD,true); c.setUint32(16,crc,true); c.setUint32(20,data.length,true); c.setUint32(24,data.length,true);
+    c.setUint16(28,nm.length,true); c.setUint32(42,off,true); cen.push(new Uint8Array(c.buffer),nm);
+    off+=30+nm.length+data.length; }
+  const cl=cen.reduce((a,u)=>a+u.length,0), e=new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true); e.setUint16(8,files.length,true); e.setUint16(10,files.length,true); e.setUint32(12,cl,true); e.setUint32(16,off,true);
+  return new Blob([...parts,...cen,new Uint8Array(e.buffer)],{type:"application/zip"});
+}
+function svgToPng(svg,k){ return new Promise((res,rej)=>{ const img=new Image(), url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
+  img.onload=()=>{ const cv=document.createElement("canvas"); cv.width=img.width*k; cv.height=img.height*k;
+    const g=cv.getContext("2d"); g.scale(k,k); g.drawImage(img,0,0); URL.revokeObjectURL(url);
+    cv.toBlob(b=>b?b.arrayBuffer().then(a=>res(new Uint8Array(a))):rej(new Error("canvas export failed")),"image/png"); };
+  img.onerror=()=>{ URL.revokeObjectURL(url); rej(new Error("PNG rendering failed in this browser; use SVG")); }; img.src=url; }); }
+async function batchFigures(){
+  const o=BATCH.out; if(!o) return;
+  const L=batchFigLoci(o).slice(0,BFIG_MAX), fmt=$("bffmt").value, mode=$("bfmode").value;
+  const btn=$("bfig"), note=$("bfnote"), enc=new TextEncoder(), files=[], man=[["n","input","combined_id","locus_uid","assembly","position","strand","orientation","file"].join("\t")];
+  const host=document.createElement("div"); host.style.cssText="position:absolute;left:-10000px;top:0;width:1100px;visibility:hidden";
+  const prevGfx=document.getElementById("gfx"); if(prevGfx) prevGfx.id="gfx__saved";
+  host.id="gfx"; document.body.appendChild(host);
+  const keep={mode:COV.mode, last:LASTDRAW}; COV.mode=mode; btn.disabled=true; let fail=0;
+  try{
+    for(let i=0;i<L.length;i++){
+      const r=L[i]; btn.textContent="drawing "+(i+1)+" / "+L.length+"\u2026";
+      try{
+        const d=unpackLocus(await getLocus(r.locus_uid)); const asm=coordOf(d,"hg38")?"hg38":"t2t", co=coordOf(d,asm);
+        if(!co){ fail++; man.push([i+1,r.input,r.combined_id,r.locus_uid,"","","","","no position"].join("\t")); continue; }
+        host.innerHTML=""; await drawLocus_(d,co,asm);
+        const svg=exportSVG(d,asm); if(!svg) throw new Error("no map");
+        const nm=String(i+1).padStart(2,"0")+"_"+d.combined_id.replace(/[^A-Za-z0-9_.-]/g,"_")+"_"+asm+"_map."+fmt;
+        files.push({name:nm,data:fmt==="svg"?enc.encode(svg):await svgToPng(svg,2)});
+        man.push([i+1,r.input,d.combined_id,d.uid,asm,co.chrom+":"+(co.start+1)+"-"+co.end,co.strand||"",
+          co.strand==="-"?"reversed (5'->3' left to right)":co.strand==="+"?"forward":"genomic",nm].join("\t"));
+      }catch(e){ fail++; man.push([i+1,r.input,r.combined_id,r.locus_uid,"","","","","failed: "+(e&&e.message||e)].join("\t")); }
+    }
+    const readme="HERV catalog v2 - dashboard v1.0 - locus maps from the batch tab\n"+
+      "rows: "+(mode==="cov"?"coverage (recount3 heat map over 127 groups + coverage tracks)":"detection")+"; format: "+fmt+"\n"+
+      "Every map is drawn 5' LTR -> 3' LTR left to right: minus-strand loci are mirrored and their axis coordinates decrease to the right.\n"+
+      "Hatching marks 100-bp bins with under half unique 100-mers (Umap): dips there follow the aligner, not expression.\n"+
+      (batchFigLoci(o).length>BFIG_MAX?"Capped at the first "+BFIG_MAX+" of "+batchFigLoci(o).length+" distinct loci.\n":"");
+    files.unshift({name:"maps_manifest.tsv",data:enc.encode(man.join("\n")+"\n")},{name:"README.txt",data:enc.encode(readme)});
+    saveBlob(makeZip(files),"herv_batch_maps_"+mode+"_"+fmt+".zip");
+    note.textContent=(files.length-2)+" map"+(files.length===3?"":"s")+" saved"+(fail?"; "+fail+" could not be drawn (listed in maps_manifest.tsv)":"");
+  } finally {
+    host.remove(); if(prevGfx) prevGfx.id="gfx"; COV.mode=keep.mode; LASTDRAW=keep.last;
+    btn.disabled=false; btn.textContent="download "+L.length+" map"+(L.length>1?"s":"")+" (zip)"; }
 }
 /* ---------------------------------------------------------------- browse view
    The whole catalog as one filterable, sortable table. Rows come from listmeta (name,
@@ -1110,8 +1196,8 @@ function drawList(){
     }catch(err){ showError("Loading locus",err); }});
 }
 </script>
-<script src="detail.js?v=d6817592f00b"></script>
-<script src="tx.js?v=d6817592f00b"></script>
+<script src="detail.js?v=7bc0fae452e4"></script>
+<script src="tx.js?v=7bc0fae452e4"></script>
 <div id="tip"></div>
 <script>
 /* Hover cards: any element with data-tip (HTML, pre-escaped).

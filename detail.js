@@ -91,6 +91,7 @@ function render(d,h){
      '<span class="idk">cite as</span><span class="uid vid">'+esc(d.versioned_id)+'</span>'+
      '<button class="cpy" data-copy="'+esc(d.versioned_id)+'" title="copy the versioned_id">copy</button></div>'+
      posLine(d,hg,t2)+
+     ((d.cn||[]).length?'<div class="note" style="font-style:normal;border-left:3px solid #e0b787;padding-left:8px">'+d.cn.map(esc).join("<br>")+"</div>":"")+
      '<div class="note">Cite the versioned_id. locus_uid is the immutable primary key; combined_id is positional and may re-letter.</div>'+
      glance(d)+
      '<div style="margin-top:9px">'+links+fastaButtons(d,hg,t2)+'</div>'+
@@ -728,7 +729,9 @@ function exportSVG(d,asm){
   c.querySelectorAll("title").forEach(e=>e.remove());
   c.querySelectorAll(".hit").forEach(e=>e.remove());
   c.querySelectorAll("*").forEach(e=>{ for(const a of ["fill","stroke","style"]){
-    const v=e.getAttribute(a); if(v&&v.includes("var(")) e.setAttribute(a,rv(v)); } });
+    const v=e.getAttribute(a); if(v&&v.includes("var(")) e.setAttribute(a,rv(v)); }
+    // hover targets are fill="transparent", a CSS colour that SVG 1.1 editors (Inkscape) draw black
+    for(const a of ["fill","stroke"]) if(e.getAttribute(a)==="transparent") e.setAttribute(a,"none"); });
   const vb=(svg.getAttribute("viewBox")||"0 0 1080 200").split(/\s+/).map(Number);
   const W=vb[2], top=26, used=(document.getElementById("gfx").dataset.used||"").split(",").filter(Boolean);
   const LEG={ltr:"ERV LTR",int:"ERV internal",orf:"gEVE ORF",dom:"HERVarium domain",u3:"U3",rr:"R",u5:"U5",
@@ -748,13 +751,35 @@ function exportSVG(d,asm){
       jxO(p[0]).toFixed(2)+'" stroke-linecap="round"/><text x="'+(239+i*52)+'" y="'+(ly+11)+'" font-size="9" fill="#666">'+
       p[1]+"</text>").join("")+'<text x="380" y="'+(ly+11)+'" font-size="10" fill="#444">above = sense, below = '+
       "antisense, dashed = no mappable anchor</text>"; }
+  // coverage mode: heat-map colour key, the low-mappability hatch, and which groups the tracks show
+  // (chosen on the page, so the file has to say)
+  let defs="";
+  if(used.includes("covheat")){ ly+=18;
+    leg+='<text x="'+MAPL+'" y="'+(ly+11)+'" font-size="10" fill="#444">mean coverage per base per 10\u2079 aligned bases</text>'+
+      [0.01,0.03,0.1,0.3,1,3,10,30].map((v,i)=>'<rect x="'+(MAPL+300+i*40)+'" y="'+(ly+2)+'" width="12" height="10" fill="'+covCol(v*1.05)+'"/>'+
+        '<text x="'+(MAPL+315+i*40)+'" y="'+(ly+11)+'" font-size="9" fill="#666">'+(v<1?String(v).replace("0.","."):v)+"</text>").join(""); }
+  if(used.includes("covhatch")){ ly+=16;
+    leg+='<rect x="'+MAPL+'" y="'+(ly+2)+'" width="20" height="10" fill="#de4968"/><rect x="'+MAPL+'" y="'+(ly+2)+'" width="20" height="10" fill="url(#covhatchl)"/>'+
+      '<text x="'+(MAPL+26)+'" y="'+(ly+11)+'" font-size="10" fill="#444">under half the bin has unique 100-mers (Umap): dips there follow the aligner, not expression</text>'; }
+  const trk=asm==="hg38"&&COV.mode==="cov"&&d.cv&&d.cov&&(LOOKUP.tissue||{}).groups?covSel(d):[];
+  if(trk.length){ const TG=LOOKUP.tissue.groups; ly+=18;
+    let tx=MAPL+112; leg+='<text x="'+MAPL+'" y="'+(ly+11)+'" font-size="10" fill="#444">coverage tracks:</text>';
+    trk.forEach((g,i)=>{ const t=TG[g][0]+" (n="+TG[g][3]+")", w=26+t.length*6.0;
+      if(tx+w>W-10){ tx=MAPL+112; ly+=15; }
+      leg+='<line x1="'+tx+'" y1="'+(ly+7)+'" x2="'+(tx+16)+'" y2="'+(ly+7)+'" stroke="'+COV_LINE[i%8]+'" stroke-width="2"/>'+
+        '<text x="'+(tx+20)+'" y="'+(ly+11)+'" font-size="10" fill="#444">'+esc(t)+"</text>"; tx+=w+8; }); }
   const H=vb[3]+top+ly+28, co=coordOf(d,asm)||{};
   const title=d.combined_id+"  ("+d.uid+", "+d.versioned_id+")  \u00b7  "+asm+" "+co.chrom+":"+
     ((co.start||0)+1).toLocaleString()+"-"+(co.end||0).toLocaleString()+
-    (co.strand==="+"||co.strand==="-"?"  ("+(co.strand==="-"?"\u2212":"+")+" strand)":"");
+    (co.strand==="+"||co.strand==="-"?"  ("+(co.strand==="-"?"\u2212":"+")+" strand"+(co.strand==="-"?"; drawn reversed, 5\u2032\u21923\u2032 left to right":"")+")":"");
   const inner=new XMLSerializer().serializeToString(c).replace(/^<svg[^>]*>/,"").replace(/<\/svg>\s*$/,"");
-  return '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="'+W+
-    '" height="'+H+'" viewBox="0 0 '+W+" "+H+'" font-family="Menlo,Consolas,monospace">'+
+  // width/height in px with a matching viewBox; the sodipodi:namedview only sets the editor's opening
+  // view (Inkscape otherwise opens at its own default zoom); browsers ignore it.
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" '+
+    'xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" '+
+    'width="'+W+'px" height="'+H+'px" viewBox="0 0 '+W+" "+H+'" font-family="Menlo,Consolas,monospace">'+
+    '<sodipodi:namedview inkscape:zoom="1" inkscape:cx="'+(W/2)+'" inkscape:cy="'+(H/2)+'" inkscape:document-units="px" '+
+    'pagecolor="#ffffff" inkscape:pageopacity="1"/>'+
     '<rect width="100%" height="100%" fill="#ffffff"/>'+
     '<text x="10" y="17" font-size="12" font-weight="bold" fill="#1b1b1f">'+esc(title)+"</text>"+
     '<g transform="translate(0,'+(top-vb[1])+')">'+inner+"</g>"+
@@ -971,6 +996,11 @@ function coordTable(d,xg){
       "% identity, "+esc(xg.xg_class||"")+", edit distance "+fmt(xg.edit_dist)+"</div>":"")+
     '<div class="note">Stored coordinates are 0-based half-open (UCSC/BED). Displayed as 1-based inclusive.</div>';
 }
+// D57: ERVmap ids / names on a locus holding < 1/3 of the ERVmap element (and not its largest
+// share) are listed but not matched by search or batch; compound ERVmap names are also split.
+const ALIAS_NOTE={ervmap_id_partial:"partial overlap: this locus holds under a third of the ERVmap element; not used for search or batch matching",
+  ervmap_alt_name_partial:"partial overlap: this locus holds under a third of the ERVmap element; not used for search or batch matching",
+  ervmap_alt_name_part:"split: one name from a comma-joined ERVmap alt name"};
 function aliasTable(al){
   const by={}; al.forEach(a=>{(by[a.alias_type]=by[a.alias_type]||[]).push(a);});
   return '<div class="acols">'+Object.keys(by).sort().map(t=>{
@@ -979,7 +1009,8 @@ function aliasTable(al){
       out.push('<span class="mono">'+esc(a.alias)+"</span>"+
         (a.assignment?' <span class="badge">'+esc(a.assignment)+"</span>":"")+
         (a.is_current?"":' <span class="badge retired">retired</span>'));});
-    return '<div class="ai"><span>'+esc(t)+"</span><span>"+out.join("<br>")+"</span></div>";}).join("")+"</div>";
+    return '<div class="ai"><span'+(ALIAS_NOTE[t]?' title="'+ALIAS_NOTE[t]+'"':"")+'>'+esc(t)+(ALIAS_NOTE[t]?' <span class="badge">'+ALIAS_NOTE[t].split(":")[0]+"</span>":"")+
+      "</span><span>"+out.join("<br>")+"</span></div>";}).join("")+"</div>";
 }
 
 // ---- locus graphic ----
@@ -1036,6 +1067,21 @@ async function drawLocus_(d,co,asm){
   const PAD=1000, W=1080, L=MAPL, R=14;
   const w0=Math.max(0,co.start-PAD), w1=co.end+PAD, span=w1-w0;
   const x=p=>L+(Math.min(Math.max(p,w0),w1)-w0)/span*(W-L-R);
+  // Orientation (2026-10-09): a \u2212-strand locus is drawn mirrored so the element always reads
+  // 5\u2032\u21923\u2032 left to right. Lanes are drawn in genomic order with x() and then mirrored as a
+  // whole (MIR); text inside is counter-mirrored about its own x so it stays readable, and
+  // start/end anchors swap so labels keep their side relative to the feature they name.
+  const FLIP=co.strand==="-", XM=p=>FLIP?(L+W-R)-x(p):x(p);
+  const MIR=svg=>!FLIP?svg:'<g transform="matrix(-1 0 0 1 '+(L+W-R)+' 0)">'+
+    svg.replace(/<text\b([^>]*)>/g,(m,a)=>{
+      if(/\btransform=/.test(a)) return m;
+      const xm=a.match(/\bx="(-?[\d.]+)"/), X=xm?+xm[1]:0;
+      // gutter labels (row names left of the data area) stay where they are, unmirrored,
+      // and so do the coverage tracks' y-axis labels at the right edge (X = W-R-2, anchored end)
+      if(X<L||X>=W-R-2) return '<text'+a+' transform="matrix(-1 0 0 1 '+(L+W-R)+' 0)">';
+      a=a.replace(/text-anchor="(start|end)"/,(q,v)=>'text-anchor="'+(v==="start"?"end":"start")+'"');
+      if(!/text-anchor=/.test(a)) a+=' text-anchor="end"';
+      return '<text'+a+' transform="matrix(-1 0 0 1 '+(2*X)+' 0)">'; })+"</g>";
   // gEVE ORFs and HERVarium domains are stored in hg38 coordinates ONLY, so they
   // are omitted on t2t rather than drawn at wrong positions. Gene models are NOT:
   // the bundle is assembly-keyed, hg38 from GENCODE and t2t from hs1 RefSeq, each
@@ -1349,21 +1395,22 @@ async function drawLocus_(d,co,asm){
   lanes.forEach(ln=>{
     body+='<g transform="translate(0,'+y+')">'+
       laneLabel(L-6,10,ln.label,"var(--mut)",10.5,L-6)+
-      (ln.sub?lbl(L-6,23,ln.sub,"var(--mut)",9.5,"end",true):"")+ln.draw()+"</g>";
+      (ln.sub?lbl(L-6,23,ln.sub,"var(--mut)",9.5,"end",true):"")+MIR(ln.draw())+"</g>";
     y+=ln.h+5;});
   // locus extent guides + axis
-  const guides=line(x(co.start),0,x(co.start),y,"var(--guide)",1,"2,2")+
-               line(x(co.end),0,x(co.end),y,"var(--guide)",1,"2,2");
+  const guides=line(XM(co.start),0,XM(co.start),y,"var(--guide)",1,"2,2")+
+               line(XM(co.end),0,XM(co.end),y,"var(--guide)",1,"2,2");
   let axis=line(L,y+4,W-R,y+4,"var(--axis)",1);
   const ticks=5;
   // edge ticks anchor inward: a centred label at the last tick overflows the viewBox
   // and is clipped by the browser (the right-hand coordinate showed as "4,043,77").
   for(let i=0;i<=ticks;i++){const p=w0+(w1-w0)*i/ticks;
-    const an=i===0?"start":(i===ticks?"end":"middle");
-    axis+=line(x(p),y+4,x(p),y+8,"var(--axis)",1)+
-      lbl(x(p),y+20,Math.round(p).toLocaleString(),"var(--mut)",10,an,true);}
+    const an=(i===0)!==FLIP?(i===0||i===ticks?"start":"middle"):(i===0||i===ticks?"end":"middle");
+    axis+=line(XM(p),y+4,XM(p),y+8,"var(--axis)",1)+
+      lbl(XM(p),y+20,Math.round(p).toLocaleString(),"var(--mut)",10,an,true);}
   axis+=lbl(L,y+35,asm+" "+co.chrom+"  ·  window "+(w1-w0).toLocaleString()+" bp  ·  locus "+
-        (co.end-co.start).toLocaleString()+" bp","var(--mut)",10.5,"start",true);
+        (co.end-co.start).toLocaleString()+" bp"+(FLIP?"  ·  \u2190 coordinates decrease left to right (\u2212 strand, drawn 5\u2032\u21923\u2032)":
+        co.strand==="+"?"  ·  + strand, drawn 5\u2032\u21923\u2032":""),"var(--mut)",10.5,"start",true);
   const LEG=[["ltr","ERV LTR"],["int","ERV internal"],["orf","gEVE ORF"],["dom","HERVarium domain"],
     ["u3","U3"],["rr","R"],["u5","U5 (HERVarium; dashed outline = low-confidence call)"],
     ["hvo","HERVOminer ORF \u2265 81 aa (solid = identical gEVE ORF; dashed = placed by similarity)"],
@@ -1379,7 +1426,7 @@ async function drawLocus_(d,co,asm){
         'fill="var(--ccle)" fill-opacity="'+ccO(p[0],((LOOKUP||{}).ccle||{}).n_lines_kmer||((LOOKUP||{}).ccle||{}).n_lines||1019).toFixed(2)+'" stroke="var(--ccle)" stroke-width="0.6"/>'+
         '<text x="'+(i*40+18)+'" y="11" font-size="10.5" fill="var(--mut)">'+p[1]+"</text>").join("")+"</svg></span>":"")+
     (USED.has("covheat")?'<span class="jxkey">mean coverage per base per 10\u2079 aligned bases '+covKey()+'</span>':"")+
-    (USED.has("covhatch")?'<span class="jxkey"><svg width="22" height="12">'+COV_HATCH+'<rect x="1" y="1" width="20" height="10" fill="#de4968"/><rect x="1" y="1" width="20" height="10" fill="url(#covhatch)"/></svg> '+
+    (USED.has("covhatch")?'<span class="jxkey"><svg width="22" height="12">'+COV_HATCH+'<rect x="1" y="1" width="20" height="10" fill="#de4968"/><rect x="1" y="1" width="20" height="10" fill="url(#covhatchl)"/></svg> '+
       'under half the bin has unique 100-mers (Umap): reads there are shared with other copies, so dips and spikes follow the aligner, not expression</span>':"")+
     (USED.has("jx")?'<span class="jxkey">junction samples <svg width="168" height="13">'+
       [[10,"10"],[1000,"1k"],[100000,"100k"]].map((p,i)=>'<line x1="'+(i*56+2)+'" y1="6" x2="'+(i*56+22)+
@@ -1387,7 +1434,12 @@ async function drawLocus_(d,co,asm){
         '" stroke-linecap="round"/><text x="'+(i*56+26)+'" y="11" font-size="10.5" fill="var(--mut)">'+p[1]+"</text>").join("")+
       '</svg> \u00b7 above = sense, below = antisense \u00b7 dashed = no mappable anchor</span>':"")+
     '<span style="margin-left:auto">hover for details \u00b7 click to pin and copy</span></div>';
-  $("gfx").innerHTML=(isHg&&d.cov&&d.cv&&d.pf?covCtl(d):"")+'<svg viewBox="0 -6 '+W+" "+(y+50)+'" width="'+W+'">'+guides+body+axis+"</svg>"+legend+
+  const ORI=co.strand==="+"||co.strand==="-"?'<div class="orient'+(FLIP?" flip":"")+'"><b>'+(FLIP?"Reversed view":"Forward view")+
+    '</b> \u2014 drawn along the HERV, 5\u2032 LTR \u2192 3\u2032 LTR left to right ('+(FLIP?"\u2212 strand: genomic coordinates decrease to the right, "+
+    "and features on the + strand point left":"+ strand: genomic coordinates increase to the right")+
+    "). Every locus is oriented this way, so elements of one group line up.</div>":
+    '<div class="orient">Strand unknown \u2014 drawn in genomic orientation.</div>';
+  $("gfx").innerHTML=ORI+(isHg&&d.cov&&d.cv&&d.pf?covCtl(d):"")+'<svg viewBox="0 -6 '+W+" "+(y+50)+'" width="'+W+'">'+guides+body+axis+"</svg>"+legend+
     (gmodels.length?"":'<div class="note">no '+(isHg?"GENCODE":"RefSeq")+
       ' transcript in this window'+
       (GA.includes(asm)?"":" (no "+asm+" gene models in bundle)")+"</div>")+
@@ -1583,8 +1635,12 @@ function covUniq(d,co){
     const lo=Math.max(a,b00+100*i), hi=Math.min(b,b00+100*i+100); if(hi>lo) out[i]+=(hi-lo)/100; } }
   return out;
 }
+// Two hatches (2026-10-09): over the heat map only thin lines, no wash, so the cell colours keep
+// their value; over the coverage tracks the white wash stays (it does not change a line's value).
 const COV_HATCH='<defs><pattern id="covhatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'+
-  '<rect width="4" height="4" fill="#ffffff" fill-opacity="0.35"/><line x1="0" y1="0" x2="0" y2="4" stroke="#3a3a3a" stroke-width="1.1" stroke-opacity="0.55"/></pattern></defs>';
+  '<rect width="4" height="4" fill="#ffffff" fill-opacity="0.35"/><line x1="0" y1="0" x2="0" y2="4" stroke="#3a3a3a" stroke-width="1.1" stroke-opacity="0.55"/></pattern>'+
+  '<pattern id="covhatchl" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'+
+  '<line x1="0" y1="0" x2="0" y2="5" stroke="#3a3a3a" stroke-width="0.7" stroke-opacity="0.5"/></pattern></defs>';
 function covSel(d){ return COV.sel[d.uid]||(COV.sel[d.uid]=d.cv[3].slice()); }
 function covRedraw(){ if(LASTDRAW) drawLocus(...LASTDRAW); }
 function covMode(m){ COV.mode=m; covRedraw(); }
@@ -1622,7 +1678,7 @@ function covLanes(d,co,lanes,USED,x,w0,w1,W,L,R){
   let nLow=0, nBody=0; for(let i=0;i<n;i++){ const a=b00+100*i; if(a+100>co.start&&a<co.end){ nBody++; if(lowU(i)) nLow++; } }
   if(nLow) USED.add("covhatch");
   const hatchRuns=(y0,h)=>{ let o="", i=i0; while(i<i1){ if(!lowU(i)){ i++; continue; } let j=i; while(j+1<i1&&lowU(j+1)) j++;
-      const xa=x(Math.max(b00+100*i,w0)), xb=x(Math.min(b00+100*(j+1),w1)); o+='<rect x="'+xa.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+Math.max(0.6,xb-xa).toFixed(1)+'" height="'+h.toFixed(1)+'" fill="url(#covhatch)" pointer-events="none"/>'; i=j+1; }
+      const xa=x(Math.max(b00+100*i,w0)), xb=x(Math.min(b00+100*(j+1),w1)); o+='<rect x="'+xa.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+Math.max(0.6,xb-xa).toFixed(1)+'" height="'+h.toFixed(1)+'" fill="url(#covhatchl)" pointer-events="none"/>'; i=j+1; }
     return o; };
   lanes.push({label:"coverage \u00b7 "+G+" groups",h:Math.ceil(yy)+2,draw:()=>{
     let g="";
