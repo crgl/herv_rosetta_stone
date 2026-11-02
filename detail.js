@@ -4,7 +4,7 @@ const UCSC={hs1:"https://genome.ucsc.edu/cgi-bin/hgTracks?db=hs1&position=",
             t2t:"https://genome.ucsc.edu/cgi-bin/hgTracks?db=hs1&position="};
 /* Reverse the build's shard packing (build_dashboard.pack_repeats and, from layout 2,
    pack_record) into the row shapes the renderers use. Idempotent; needs LOOKUP loaded. */
-const ROW_FIELDS=["aliases","coord","segments","geve","domains","hervarium","hvorf","genes","dfam_best","hml2_detail","missillac"];
+const ROW_FIELDS=["aliases","coord","segments","geve","domains","hervarium","hvorf","hvnovel","hvext","hvscan","genes","dfam_best","hml2_detail","missillac"];
 function unpackLocus(d){
   if(!d||d._unpacked) return d;
   const LK=(typeof LOOKUP!=="undefined"&&LOOKUP)||{};
@@ -96,6 +96,7 @@ function render(d,h){
      glance(d)+
      '<div style="margin-top:9px">'+links+fastaButtons(d,hg,t2)+'</div>'+
      '<div class="note" id="fastanote" style="min-height:0"></div></div>'+
+   insPanel(d)+
    '<div class="panel"><h2>Locus map ±1 kb ('+(gasm||"—")+')'+
      (gco&&gasm!=="hg38"?' <span class="note" style="font-weight:400">— hg38 coordinate absent;'+
        ' gene models, gEVE ORFs and HERVarium domains are hg38-only and are omitted</span>':"")+
@@ -108,6 +109,7 @@ function render(d,h){
      (gco?'<div class="note">rendering…</div>'
         :'<div class="note">no hg38 or t2t coordinate — graphic unavailable</div>')+'</div>'+
      '</div>'+
+   '<div class="panel"><h2>Aliases — '+new Set(d.aliases.map(a=>a.alias_type)).size+' types<span class="dlbtns">'+dlt("aliases","TSV","all aliases of this locus")+'</span></h2>'+aliasTable(d.aliases)+'</div>'+
    '<div class="two">'+
      '<div class="panel"><h2>Locus</h2><dl class="kv">'+
        kv("group",d.group)+kv("band",d.band)+kv("origin",d.origin)+
@@ -115,6 +117,8 @@ function render(d,h){
        kv("LTR names",st.ltr_names)+kv("internal names",st.int_names)+
        kv("tandem/nested",st.is_tandem_or_nested?"yes":"no")+
        kv("segments",d.segments.length+(d.segments.length?"":" (none stored)"))+
+       (d.poly?kv("population",esc(d.poly.state)+(d.poly.kind==="insertion"?"":
+         ' <span class="m">'+d.poly.n_loss+" of "+d.poly.n_assessed+" haplotypes lack the interior</span>")):"")+
        spliceKv(d)+
      '</dl></div>'+
      '<div class="panel"><h2>Group — '+esc(d.group)+(d.group?'<span class="dlbtns"><a class="ucsc" href="#browse?g='+encodeURIComponent(d.group)+
@@ -130,8 +134,13 @@ function render(d,h){
        // group's dominant lineage carried WITH its share, so a reader can see
        // when "dominant" means 85% and when it means 38%.
        lineageKv(d,g)+
+       // Loci RepeatMasker counts as one element. Sits with group/identity rather than
+       // in the map panel: it is a statement about what this locus IS relative to its
+       // neighbours, and it is the first thing to check before reading a per-locus count
+       // as element-specific.
+       rmShareKv(d)+
      '</dl></div></div>'+
-   '<div class="panel"><h2>Aliases — '+new Set(d.aliases.map(a=>a.alias_type)).size+' types<span class="dlbtns">'+dlt("aliases","TSV","all aliases of this locus")+'</span></h2>'+aliasTable(d.aliases)+'</div>'+
+   popPanel(d)+
    tuPanel(d)+
    cclePanel(d)+
    tissuePanel(d)+rnaAtlasPanel(d)+
@@ -168,6 +177,11 @@ function render(d,h){
 }
 const how=(label,html)=>'<details class="how"><summary>'+label+'</summary><div class="note">'+html+"</div></details>";
 function kv(k,v){return "<dt>"+esc(k)+"</dt><dd>"+fmt(v)+"</dd>";}
+/* kv() escapes its value through fmt(), which is right for a bare catalog field and wrong
+   for a value assembled here from markup -- the Population panel rendered its own
+   <span class="m"> tags as visible text. kvh() takes already-built HTML: every variable
+   interpolated into it must be esc()'d by the caller. */
+function kvh(k,html){return "<dt>"+esc(k)+"</dt><dd>"+(html==null||html===""?"\u2014":html)+"</dd>";}
 /* Catalog codes shown as values (keep_released, ltr_and_internal, ...) read as words. */
 const hum=v=>v==null?v:String(v).replace(/_/g," ");
 /* LIL -> "LTR – internal – LTR (LIL)": the structure code spelled out, code kept. */
@@ -201,12 +215,287 @@ function neighbours(d){
    nothing here is computed differently from its panel. Chips that qualify how the
    expression panels may be read (intronic, host-exonic, host-following, low unique
    mappability) are drawn as warnings so the caveat is visible before the data. */
+// ---- Population structure (S35) -------------------------------------------------
+// Counts, never frequencies, are what the catalog stores: the denominator moves as
+// haplotypes are added. The panel shows both and derives the percentage for display.
+function pctOf(n,d){ return (d&&d>0)?(100*n/d).toFixed(1)+"%":"\u2014"; }
+
+/* Copy number across haplotypes. dist rows are [copies, haplotypes, chain-confirmed,
+   chain-gap, rare?]. Every state whose measured internal length fits an integer multiple of
+   the reference unit is listed, including states below the 2-haplotype / 1% bar (marked
+   rare) and states the chain check could not confirm. The chain caveat is not incidental: a
+   tandem expansion opens a gap in the hg38<->haplotype chain, so the check that confirms the
+   interval fails on exactly the largest states -- the reason this panel used to report K108
+   as "1-2 copies" while one haplotype carries 6. */
+/* Loci that RepeatMasker counts as ONE element. rmshare rows are
+   [repnames, elem_span, this locus's overlap_bp, [[uid, combined_id, overlap_bp], ...]].
+   Where one element carries several loci the catalog has split a single annotated
+   insertion -- an unrelated repeat landed inside it, or Telescope drew a boundary
+   through it. The loci stay separate; this row just says who else is on the element,
+   so a read assigned to one can be checked against the others. */
+function rmShareKv(d){
+  const rs=d&&d.rmshare; if(!rs||!rs.length) return "";
+  const rows=rs.map(function(e){
+    const names=esc(e[0]), span=bpx(e[1]), mine=e[2];
+    const links=e[3].map(function(o){
+      return '<a href="#'+esc(o[0])+'" title="'+esc(o[1])+" covers "+o[2].toLocaleString()+
+             ' bp of this element">'+esc(o[1])+"</a>";
+    }).join(", ");
+    return "<div>"+links+' <span class="m">\u2014 '+names+", "+span+
+           " element; this locus covers "+mine.toLocaleString()+" bp of it</span></div>";
+  }).join("");
+  return kvh("same RepeatMasker element",
+    rows+' <span class="m">RepeatMasker annotates these loci as parts of a single element. '+
+    "They are kept separate here, but a read placed on one may belong to another \u2014 check "+
+    "them together before treating a per-locus count as element-specific.</span>");
+}
+
+function cnKv(p){
+  const c=p&&p.cn; if(!c||!c.dist||c.dist.length<2) return "";
+  const sup=i=>c.dist.map(r=>r[i]).reduce((a,b)=>a+b,0);
+  const parts=c.dist.map(r=>r[0]+"\u00d7 in "+r[1]+(r[4]?"*":"")).join(", ");
+  const lo=c.dist[0][0], hi=c.dist[c.dist.length-1][0];
+  /* -1 in the chain columns means the chain was NOT RECOMPUTED for this locus (it was
+     refreshed in a re-projection run that made no chain pass), which is different from 0
+     ("the chain confirms none of these"). Such rows are excluded from the gap list and
+     reported separately below, so an absent chain row is never read as a failed check. */
+  const nochain=c.dist.filter(r=>r[2]<0);
+  const gap=c.dist.filter(r=>r[2]===0&&r[3]>0);
+  let out=kvh(c.multi?"tandem copy number":"interior copies",
+    (c.multi?"<strong>varies "+lo+"\u2013"+hi+" copies</strong>":lo+"\u2013"+hi+" copies")+
+    ' <span class="m">'+esc(parts)+" of "+c.n+" haplotypes; reference has "+c.ref+
+    (sup(4)?"; * carried by one haplotype or under 1% of calls":"")+"</span>");
+  if(gap.length) out+=kvh("not chain-confirmed",
+    esc(gap.map(r=>r[0]+"\u00d7").join(", "))+' <span class="m">'+
+    gap.reduce((a,r)=>a+r[1],0)+" haplotype(s). The expansion itself opens a gap in the hg38 chain, "+
+    "so placement could not be confirmed; the measured length still fits an exact multiple of the "+
+    "reference internal unit, which is why the state is listed rather than dropped.</span>");
+  if(nochain.length) out+=kvh("chain check",
+    '<strong>not recomputed</strong> <span class="m">this locus was refreshed in a '+
+    "re-projection run that made no chain pass, so no call here is chain-confirmed or "+
+    "chain-contradicted \\u2014 the check was simply not performed. The copy-number states "+
+    "rest on the interior measurement and the padded-span change.</span>");
+  return out;
+}
+
+/* The inserted element, drawn in its OWN panel on its OWN axis (0..carrier_ins_bp).
+   It cannot share the locus map's axis: the element occupies no reference bases, so any bar
+   on the reference scale reads as flank sequence that is not there. Offsets are measured in
+   the canonical carrier assembly and are not reference coordinates -- the panel heading and
+   the axis caption both say so. Regions with no RepeatMasker annotation are left as
+   background rather than filled, so a 94 kb insertion with 26 kb of annotated repeat does
+   not read as 94 kb of ERV. */
+function insPanel(d){
+  const p=d.poly; if(!p||p.kind!=="insertion") return "";
+  const ins=p.carrier_ins_bp||p.ins_bp||0;
+  /* RepeatMasker splits one internal region into adjacent fragments of the same name (K113's
+     element is reported as two HERVK-int pieces 72 bp apart). Drawn as separate blocks those
+     read as two tandem copies. Adjacent fragments of the same repeat and class are joined when
+     the gap is small AND the joined length still fits one full-length unit for the group, so a
+     genuine tandem duplication -- which exceeds the unit, or is separated by an LTR -- stays
+     drawn as the two copies it is. The fragment count is kept in the tooltip. */
+  const MAXGAP=250;
+  const segs=(()=>{
+    const s=(p.seg||[]).slice().sort((a,b)=>a[0]-b[0]), unit=p.int_unit||0, o=[];
+    for(const g of s){
+      const t=o[o.length-1];
+      if(t&&t[2]===g[2]&&t[3]===g[3]&&g[0]-t[1]<=MAXGAP&&
+         (!unit||g[1]-t[0]<=unit*1.15)){ t[1]=g[1]; t[5]=(t[5]||1)+1; }
+      else o.push([g[0],g[1],g[2],g[3],g[4],1]);
+    }
+    return o;})();
+  const W=1080, L=MAPL, R=14, H=26, IW=W-L-R, Y=8;
+  const xi=o=>L+(ins?Math.min(Math.max(o,0),ins)/ins:0)*IW;
+  let body='<rect x="'+L+'" y="'+Y+'" width="'+IW+'" height="'+H+'" fill="var(--rep-low)" '+
+           'fill-opacity="0.18" stroke="var(--line)" stroke-width="0.8" rx="1.5"/>';
+  for(const sg of segs){
+    const isL=sg[3]==="ltr", c=isL?"var(--ltr)":"var(--int)";
+    const a=xi(sg[0]), b=xi(sg[1]), w=Math.max(1,b-a);
+    body+=rect(a,Y,w,H,c,card(sg[2],[["part",isL?"LTR":"internal"],
+      ["offset in insertion",sg[0].toLocaleString()+"\u2013"+sg[1].toLocaleString()+" bp"],
+      ["length",bpx(sg[1]-sg[0])],["strand",sg[4]],["measured in",p.carrier],
+      ["RepeatMasker fragments",sg[5]>1?sg[5]+" adjacent fragments of the same repeat, joined "+
+        "(one region split by RepeatMasker, not tandem copies)":null],
+      ["note","carrier-assembly offsets, not reference coordinates"]],c));
+    if(fits(w,sg[2],9.5)) body+=lbl((a+b)/2,Y+17,sg[2],"var(--on-strong)",9.5,"middle",true);
+  }
+  if(!segs.length) body+=lbl(L+IW/2,Y+17,"no carrier RepeatMasker segments stored",
+    "var(--on-rep)",9.5,"middle",true);
+  // axis for the element's own scale
+  const yA=Y+H+6; let ax=line(L,yA,L+IW,yA,"var(--axis)",1);
+  for(let i=0;i<=5;i++){const o=ins*i/5, X=xi(o);
+    ax+=line(X,yA,X,yA+4,"var(--axis)",1)+
+      lbl(X,yA+15,Math.round(o).toLocaleString(),"var(--mut)",10,
+          i===0?"start":i===5?"end":"middle",true);}
+  const exp=p.est_copies!=null&&p.est_copies>=1.6;
+  // "x a full-length unit", not "tandem copies": what is measured is total internal bp over a
+  // unit length. At MER4_14q32.33g the internal fragments are scattered across a 61 kb
+  // insertion rather than arranged as an array, so asserting a tandem arrangement would claim
+  // more than the measurement supports.
+  ax+=lbl(L,yA+30,"offset within the inserted element (bp) \u00b7 measured in "+(p.carrier||"?")+
+      " \u00b7 "+bpx(ins)+" total"+(exp?"  \u00b7  internal content \u2248 "+Math.round(p.est_copies)+
+      "\u00d7 a full-length unit":""),"var(--mut)",10.5,"start",true);
+  const lg='<div class="lg"><span><i style="background:var(--ltr)"></i>ERV LTR</span>'+
+    '<span><i style="background:var(--int)"></i>ERV internal</span>'+
+    '<span><i style="background:var(--rep-low);opacity:.35"></i>no repeat annotation</span>'+
+    '<span style="margin-left:auto">hover for details</span></div>';
+  return '<div class="panel"><h2>Inserted element \u2014 '+bpx(ins)+
+    ' <span class="note" style="font-weight:400">\u2014 absent from hg38 and T2T; drawn on its own '+
+    'axis in carrier coordinates</span></h2>'+
+    '<div id="insgfx"><svg viewBox="0 -6 '+W+' '+(yA+40)+'" width="'+W+'">'+body+ax+"</svg>"+lg+
+    '<div class="note">This element is not in either reference, so it has no reference '+
+    'coordinates and is not drawn on the locus map below. The map below shows the '+
+    '<strong>empty insertion site</strong> \u2014 the greyed band \u2014 with the annotated reference '+
+    'flanks on either side. '+(exp?"The annotated internal sequence in this insertion totals "+
+      Math.round(p.est_copies)+"\u00d7 a full-length internal unit for this group \u2014 more internal "+
+      "sequence than one provirus carries. Whether those copies sit as a tandem array is not "+
+      "established here: only total internal bp was measured. ":"")+
+    'Counts of carriers are in the Population structure panel.</div></div></div>';
+}
+
+function popPanel(d){
+  const p=d.poly; if(!p) return "";
+  // Only panel when there is a finding: an insertion locus, a non-reference call, or a
+  // caveat. Fixed / not-assessable loci report their state as one line in the Locus panel
+  // instead, so panel order is unchanged for the ~35k loci with nothing to add.
+  if(p.kind!=="insertion" && !p.n && !p.caveat && !(p.cn&&p.cn.multi)) return "";
+  const nh=p.n_haplotypes||0, na=p.n_assessed||0;
+  const unres=Math.max(0,nh-na);
+  let rows="", head="", note="";
+  if(p.kind==="insertion"){
+    head="Population structure \u2014 insertion absent from both references";
+    const ec=p.est_copies;
+    rows=kvh("carrier haplotypes",p.n+" of "+nh+' <span class="m">'+pctOf(p.n,nh)+"</span>")+
+         kv("inserted length",(p.ins_bp||0).toLocaleString()+" bp")+
+         kv("inserted element",p.ann||p.family||null)+
+         (p.int_bp?kvh("element content",
+            (p.ltr_bp||0).toLocaleString()+" bp LTR + "+(p.int_bp||0).toLocaleString()+
+            ' bp internal <span class="m">'+pctOf((p.ltr_bp||0)+(p.int_bp||0),p.carrier_ins_bp||p.ins_bp||0)+
+            " of the insertion is annotated repeat</span>"):"")+
+         (ec!=null?kvh("internal copies",
+            (ec>=1.6?"<strong>\u2248"+Math.round(ec)+"\u00d7 a full-length unit</strong>":ec.toFixed(2).replace(/0+$/,"")+"\u00d7")+
+            ' <span class="m">'+(p.int_bp||0).toLocaleString()+" bp internal over a "+
+            (p.int_unit||0).toLocaleString()+" bp full-length unit for this group</span>"):"")+
+         kv("canonical carrier",p.carrier)+
+         kvh("anchor",(p.anchor_bp||0)+" bp insertion site"+(p.t2t?" (hg38 and T2T)":" (hg38 only)"))+
+         (p.mhc?kv("MHC","yes \u2014 counts are per event, not per alt contig"):"");
+    note="This element is <strong>not present in hg38 or T2T-CHM13</strong>. The coordinate above is a "+
+         (p.anchor_bp||0)+" bp anchor marking the empty insertion site in the reference; the element itself "+
+         "was measured in the carrier assembly named above. "+esc(p.anchor_basis||"")+
+         " Internal copies are internal bp over a full-length internal unit for the group, not a count of "+
+         "RepeatMasker segments \u2014 RepeatMasker routinely splits one internal region in two, so counting "+
+         "segments would report duplications that are not there.";
+  }else{
+    head="Population structure \u2014 "+esc(p.state);
+    rows=kv("structural state",p.state)+
+         kvh("interior absent",p.n_loss+" of "+na+' <span class="m">'+pctOf(p.n_loss,na)+"</span>")+
+         (p.n_gain?kvh("extra interior copy",p.n_gain+" of "+na+' <span class="m">'+pctOf(p.n_gain,na)+
+            (p.n_gain_unval?"; "+p.n_gain_unval+" unvalidated":"")+"</span>"):"")+
+         /* Internal-only expansions carry no LTR annotation on either side, sit almost entirely
+            in sequence short reads cannot address (median interior callability 0.000, 72% of
+            such loci under half callable) and have had no assembly-internal check -- no spanning
+            reads, depth ratio or host-flank alignment. They are shown as a finding to follow up,
+            never as an established copy-number state. */
+         (p.n_gain_unval?kvh("unvalidated expansion",
+            "<strong>"+p.n_gain_unval+" of "+p.n_gain+" extra-copy calls</strong>"+
+            ' <span class="m">internal-only: no LTR is annotated on either the reference or the '+
+            "haplotype side. These loci lie almost entirely in sequence short reads cannot "+
+            "address, and no assembly-internal support (spanning reads, read depth against the "+
+            "local flank, host-flank alignment) has been computed. Treat as a lead, not a "+
+            "copy-number state.</span>"):"")+
+         kvh("haplotypes assessed",na+" of "+nh+(unres?' <span class="m">'+unres+" unresolved</span>":""))+
+         /* Chain provenance (S36): the chain is no longer a gate on which cells may be called
+            -- a tandem expansion opens a chain gap by construction, so gating on it dropped the
+            largest copy-number states and 13 of 14 HML-2 array loci. It is reported instead, so
+            a call the chain independently confirms is distinguishable from one it cannot. */
+         ((p.n_loss_agree!=null&&p.n)?kvh("chain-confirmed calls",
+            ((p.n_loss_agree||0)+(p.n_gain_agree||0))+" of "+p.n+
+            ' <span class="m">'+pctOf((p.n_loss_agree||0)+(p.n_gain_agree||0),p.n)+
+            " \u2014 the rest sit in a chain gap, which a tandem expansion or a deletion opens by "+
+            "construction; they rest on the interior measurement and the padded-span change</span>"):"")+
+         (p.chain_addr===0?kvh("chain placement",
+            '<strong>none</strong> <span class="m">the hg38\u2194haplotype chain does not place this '+
+            "locus in any haplotype, so no call here is chain-confirmed</span>"):"")+
+         cnKv(p)+
+         /* Non-integral expansion (S45): both expansion signals fire but the interior is not a
+            whole number of reference units, so these are NOT copy-number states. Until S45 they
+            were recorded as "reference" -- indistinguishable from no variation at all. The
+            content split says what the extra sequence is. Caveat carried in the text: the
+            per-haplotype RepeatMasker is LTR-class only, so anything outside these categories
+            is non-LTR repeat or unique sequence and the two cannot be told apart. */
+         (p.n_gain_nonintegral?kvh("non-integral expansion",
+            "<strong>"+p.n_gain_nonintegral+" of "+na+"</strong>"+
+            ' <span class="m">'+pctOf(p.n_gain_nonintegral,na)+" \u2014 the interior grew, but not by a "+
+            "whole number of reference units, so this is not a copy-number state. Extra sequence is "+
+            ({same_family:"the <strong>same family</strong> as this locus\u2019s own internal annotation",
+             other_family:"predominantly a <strong>different family</strong> \u2014 read the composition "+
+               "table before treating it as this element\u2019s",
+             mixed:"a <strong>mix</strong> of this family and others",
+             same_family_neighbour_locus:"the same family, but <strong>another catalog locus of that "+
+               "family sits inside this window</strong>, so it may be that locus\u2019s sequence",
+             neighbour_insertion_bleed:"a <strong>catalogued non-reference insertion</strong> next door "+
+               "bleeding into this window \u2014 not this element",
+             not_probed:"<strong>not characterised</strong> (locus outside the probe query)"
+            }[p.nonintegral_content]||"not characterised")+
+            ". Per-haplotype RepeatMasker is LTR-class only, so bp outside these categories is "+
+            "non-LTR repeat or unique sequence and the two cannot be separated.</span>"):"")+
+         (p.hg38_internal_deficit?kvh("hg38 annotation deficit",
+            '<strong>reference under-annotates this interior</strong> <span class="m">same-family '+
+            "internal sequence exceeds the hg38 annotation by at least 1.3\u00d7 in at least 90% of "+
+            "haplotypes, so the shortfall is in the reference annotation rather than variation among "+
+            "the sampled genomes. Reference-derived interior length is an underestimate here.</span>"):"")+
+         (p.call_source?kvh("call provenance",
+            '<strong>'+esc(hum(p.call_source))+'</strong> <span class="m">'+
+            ({v1_unmerged_window:"this locus\u2019s calls come from the earlier query geometry, whose "+
+               "window did not merge this provirus with a nearby solo-LTR site; in the current "+
+               "geometry the aligner mis-anchored the interior onto that site. Two haplotypes "+
+               "absent from that run are not assessed here.",
+             v3_window:"recomputed from the 2026 re-projection against current locus extents. "+
+               "Chain verdicts were not recomputed for that run, so no call here is chain-confirmed.",
+             v3_kit76:"recomputed from the targeted re-projection built for loci whose extents "+
+               "changed in the internal-fragment merge. Chain verdicts were not recomputed, so no "+
+               "call here is chain-confirmed."
+            }[p.call_source]||"non-default call provenance.")+"</span>"):"")+
+         (p.caveat?kvh("caveat","<strong>"+esc(p.caveat)+"</strong>"):"");
+    note="Interior presence/absence across "+nh+" haplotype-resolved HPRC assemblies ("+
+         Math.round(nh/2)+" donors). A locus counts as <em>labile</em> when the interior is absent in "+
+         "at least 1% of assessed haplotypes. Unresolved haplotypes are those where the window did not "+
+         "align confidently or the chain did not confirm placement \u2014 they are excluded from the "+
+         "denominator, not counted as reference.";
+  }
+  return '<div class="panel"><h2>'+head+'</h2><dl class="kv">'+rows+'</dl>'+
+         '<div class="note">'+note+"</div></div>";
+}
+
 function glance(d){
   const LK=(typeof LOOKUP!=="undefined"&&LOOKUP)||{}, g=d.group_info||{}, st=d.structure||{}, out=[];
   const chip=(sec,k,v,warn,tip)=>out.push('<a class="chip'+(warn==="find"?" find":warn?" warn":"")+'" data-go="'+sec+'"'+(tip?' title="'+esc(tip)+'"':"")+
     '><span class="k">'+esc(k)+"</span>"+v+"</a>");
   chip("locus","group",esc(d.group||"\u2014")+(g.herv_class?' <span class="m">class '+esc(g.herv_class)+"</span>":""));
   if(st.structure) chip("locus","structure",esc(structWords(st.structure))+(st.category?' <span class="m">'+esc(st.category)+"</span>":""));
+  // Pangenome polymorphism: shown only when there is something to say -- an insertion locus,
+  // or a reference locus with at least one non-reference call. Each figure restates the panel.
+  // cn.multi is included because copy-number variation can exist at a locus whose interior is
+  // never wholly absent or gained (n = 0): the chip must not disappear for those loci.
+  if(d.poly&&(d.poly.kind==="insertion"||d.poly.n>0||(d.poly.cn&&d.poly.cn.multi))){
+    const p=d.poly, nh=p.n_haplotypes||0, na=p.n_assessed||0;
+    if(p.kind==="insertion")
+      chip("pop","population","Absent from both references <span class=\"m\">carried by "+p.n+" of "+nh+" haplotypes</span>",true,
+           "This element is not in hg38 or T2T; the catalog coordinate is a "+(p.anchor_bp||0)+" bp insertion-site anchor");
+    else if(p.n_gain_unval)
+      chip("pop","population","Unvalidated expansion"+
+           ' <span class="m">'+p.n_gain_unval+" of "+p.n_gain+" extra-copy calls are internal-only</span>",true,
+           "Internal-only expansion: no LTR annotated on either side, almost entirely in sequence short reads cannot address, and no assembly-internal support computed. A lead, not a copy-number state.");
+    else if(p.cn&&p.cn.multi)
+      chip("pop","population","Variable tandem copies"+
+           ' <span class="m">'+p.cn.dist[0][0]+"\u2013"+p.cn.dist[p.cn.dist.length-1][0]+
+           " copies across "+p.cn.n+" haplotypes</span>",true,
+           "Interior copy number varies between haplotypes, not just presence/absence");
+    else
+      chip("pop","population",esc(p.state)+' <span class="m">interior absent in '+p.n_loss+" of "+na+" haplotypes</span>",
+           p.state==="labile",
+           "Interior presence/absence across HPRC haplotypes; "+Math.max(0,nh-na)+" haplotypes unresolved");
+  }
   const ts=d.ts, TM=LK.tissue;
   if(ts&&TM){
     const C=TM.cx||{}, cx=ts.cx;
@@ -231,8 +520,10 @@ function glance(d){
   const um=((d.mappability||{}).stats||{}).umap100_hg38||((d.mappability||{}).stats||{}).umap100_t2t;
   if(um&&!um.no_data&&um.frac!=null) chip("map","uniquely mappable",(100*um.frac).toFixed(0)+'% <span class="m">of locus, Umap 100-mers</span>',um.frac<0.5,
     um.frac<0.5?"Less than half of this locus has unique 100-mers: reads are shared with other copies, so read-based signal here depends on the aligner.":"");
+  const nN=(d.hvnovel||[]).filter(o=>o.frac>=EXT_AF).length;
+  const nS=(d.hvscan||[]).length;
   const nO=(d.geve||[]).length, nH=(d.hvorf||[]).length, nD=(d.domains||[]).length;
-  if(nO||nH||nD) chip("tables","ORFs and domains",[nO?nO+" gEVE ORF"+(nO>1?"s":""):"",nH?nH+" HERVOminer \u2265 81 aa":"",nD?nD+" domain"+(nD>1?"s":""):""].filter(Boolean).join(" \u00b7 "));
+  if(nO||nH||nD||nN||nS) chip("tables","ORFs and domains",[nO?nO+" gEVE ORF"+(nO>1?"s":""):"",nH?nH+" HERVOminer \u2265 81 aa":"",nS?nS+" \u2265 81 aa by scan (no HERVOminer region)":"",nN?nN+" novel \u2265 81 aa (HPRC)":"",nD?nD+" domain"+(nD>1?"s":""):""].filter(Boolean).join(" \u00b7 "));
   const sp=(d.splice||{}).t;
   if(sp&&sp!=="not_assessable") chip("locus","splicing (Snaptron)",sp==="none"?"no qualifying junction":esc(SPLICE_TIER[sp]||sp));
   if(ts&&TM){
@@ -252,7 +543,8 @@ function glance(d){
 /* Section navigation, foldable reference tables and copy buttons, wired after render()
    has written the page. Sections are found from the panel titles, so the bar lists only
    what this locus has. A link is #<locus_uid>/<section>; route() in index.html opens it. */
-const SECTIONS=[[/^Locus map/,"map","Map"],[/^Locus$/,"locus","Locus & group"],[/^Aliases/,"aliases","Aliases"],
+const SECTIONS=[[/^Inserted element/,"inserted","Element"],[/^Locus map/,"map","Map"],[/^Aliases/,"aliases","Aliases"],
+  [/^Locus$/,"locus","Locus & group"],[/^Population structure/,"pop","Population"],
   [/^Transcriptional unit/,"tu","Unit"],[/^CCLE expression/,"ccle","CCLE"],[/^Primary tissues/,"tissues","Tissues"],
   [/^RNA Atlas/,"rna","RNA Atlas"],[/^Transcription initiation/,"tss","TSS & splicing"],[/^Coordinates/,"coords","Coordinates"]];
 const FOLDS=/^(Dfam best alignment|gEVE ORFs|HERVarium domains|HERVarium elements|HERVOminer ORFs|Overlapping genes|Segments)/;
@@ -693,6 +985,9 @@ function tsvText(d,asm,kind){
       (d.hervarium||[]).filter(e=>e.kind==="LTR"&&inw(e.start,e.end)).forEach(e=>{ add("HERVarium LTRs",e.id,e.start,e.end,e.strand,[e.role,"U3/R/U5 "+e.st].filter(Boolean).join("; "));
         [["U3",e.u3_start,e.u3_end],["R",e.r_start,e.r_end],["U5",e.u5_start,e.u5_end]].forEach(z=>{ if(z[1]!=null&&z[2]!=null) add("HERVarium LTRs",e.id+" "+z[0],z[1],z[2],e.strand,z[0]); }); });
     }
+    if(typeof ALIASBAND!=="undefined"&&ALIASBAND) (d.aiv||[]).filter(r=>r[2]===asm&&!r[9]&&inw(r[3],r[4])).forEach(r=>
+      add("alias band: "+(ABAND_LABEL[r[0]]||r[0]),r[1],r[3],r[4],r[5],(r[6]===1?"assigned to this locus":r[6]?"assigned to "+r[6]:"assigned to no locus")+
+        "; overlap with locus segments "+r[8]+" bp"+(r[7]>1?"; "+r[7]+" parts merged to their extent":"")));
     const hp=isHg?"hg38_":"t2t_";
     (d.hvorf||[]).filter(o=>o[hp+"start"]!=null&&o[hp+"chrom"]===co.chrom&&inw(o[hp+"start"],o[hp+"end"])).forEach(o=>add("HERVOminer ORFs >= 81 aa",o.orf_id,o[hp+"start"],o[hp+"end"],o[hp+"strand"],
       o.aa_len+" aa; placed "+(o[hp+"placement"]==="exact"?"by exact sequence match":"on the most similar stretch")+(isHg&&o.geve_orf_id?"; identical to gEVE "+o.geve_orf_id:"")));
@@ -735,7 +1030,7 @@ function exportSVG(d,asm){
   const vb=(svg.getAttribute("viewBox")||"0 0 1080 200").split(/\s+/).map(Number);
   const W=vb[2], top=26, used=(document.getElementById("gfx").dataset.used||"").split(",").filter(Boolean);
   const LEG={ltr:"ERV LTR",int:"ERV internal",orf:"gEVE ORF",dom:"HERVarium domain",u3:"U3",rr:"R",u5:"U5",
-    hvo:"HERVOminer ORF \u2265 81 aa (solid = gEVE)",gene:"gene exon / intron",
+    hvo:"ORF \u2265 81 aa (solid = element sense; hollow = antisense)",hvn:"novel ORF \u2265 81 aa (HPRC, not in reference)",gene:"gene exon / intron",
     cage:"FANTOM5 CAGE peak",["rep-line"]:"LINE",["rep-sine"]:"SINE",["rep-dna"]:"DNA",["rep-other"]:"other TE",
     ["rep-low"]:"simple / low complexity",map1:"uniquely mappable",ccle:"CCLE 31-mer segment"};
   let lx=MAPL, ly=0, leg="";
@@ -1089,11 +1384,32 @@ async function drawLocus_(d,co,asm){
   const GA=((typeof LOOKUP!=="undefined"&&LOOKUP)||{}).gene_assemblies||[];
   const gmodels=gmGenes((d.gm||{})[asm]||[],w0,w1);
   const lanes=[], USED=new Set();
+  /* Non-reference insertion loci (S35). The catalog coordinate is a short anchor marking an
+     EMPTY site in the reference, so the ordinary segment lane would draw a few invisible bp.
+     The element itself is drawn in its OWN panel above this map (insPanel) on its own axis:
+     carrier offsets and reference coordinates cannot share a scale, and a lane sharing this
+     axis read as if the element occupied reference bases. Here only the empty site is marked,
+     and the anchor is greyed across the full lane stack (see `guides`) so the gap the element
+     occupies in a carrier is visible against annotated reference flanks. */
+  const pol=d.poly;
+  if(pol&&pol.kind==="insertion"){
+    const ins=pol.carrier_ins_bp||pol.ins_bp||0;
+    lanes.push({label:"insertion point",sub:"reference \u2014 element absent",h:20,draw:()=>{
+      const a=x(co.start), b=x(co.end), m=(a+b)/2;
+      return '<path d="M'+(m-6)+' 13 L'+m+' 2 L'+(m+6)+' 13 Z" fill="var(--bad)">'+
+             "<title>insertion point "+esc(co.chrom)+":"+ivx(co.start,co.end)+"</title></path>"+
+             '<line x1="'+m+'" y1="13" x2="'+m+'" y2="19" stroke="var(--bad)" stroke-width="1.5"/>'+
+             lbl(m+10,12,"\u25b2 "+bpx(ins)+" inserted here in "+pol.n+" of "+(pol.n_haplotypes||0)+
+                 " haplotypes","var(--ink)",9,"start",true);}});
+  }
   const reps=(d.repeats||[]).filter(r=>r.assembly===asm&&r.end>w0&&r.start<w1);
   // `segments` are the hg38 bases the locus owns (D48; Telescope features for Telescope loci,
   // RepeatMasker LTR-class elements otherwise). On t2t the LTR-class rows from
   // locus_repeat stand in, which is why the lane label names its source.
   const segs=isHg?(d.segments||[]).filter(s=>s.end>w0&&s.start<w1):[];
+  // An insertion locus owns no reference segments: the anchor lane above already says so,
+  // and an empty "locus extent" bar on a 6 bp anchor only adds noise.
+  if(!(pol&&pol.kind==="insertion"))
   lanes.push({label:isHg?"segments":"locus extent",h:16,draw:()=>segs.length?segs.map(s=>{
       const c=s.segment_class==="ltr"?"var(--ltr)":"var(--int)"; USED.add(s.segment_class==="ltr"?"ltr":"int");
       const a=x(s.start),b=x(s.end),txt=(s.repName||"")+(s.segment_class==="ltr"?" (LTR)":"");
@@ -1109,6 +1425,42 @@ async function drawLocus_(d,co,asm){
      lbl((x(co.start)+x(co.end))/2,9.5,
          isHg?"locus extent (no segments stored)":"locus extent (t2t; segments are hg38-only)",
          "var(--on-rep)",9,"middle",true)});
+  // Alias band (D68; toggle above the map). Each naming system's OWN interval for aliases that sit on
+  // or touch this locus, drawn when it is not congruent with the locus extent (assigned here and both
+  // ends within 10 bp). The m:n cases show here: one source interval spanning two loci, a neighbour's
+  // alias overlapping this one, a source element offset from ours. Solid = assigned here; dashed =
+  // assigned to another locus; grey = assigned to none. Overlapping intervals of a system stack.
+  const AIV=(d.aiv||[]).filter(r=>r[2]===asm);
+  if(ALIASBAND&&AIV.length){
+    const bySys=new Map();
+    for(const r of AIV){ if(!bySys.has(r[0])) bySys.set(r[0],[]); bySys.get(r[0]).push(r); }
+    [...bySys.keys()].sort((p,q)=>abOrd(p)-abOrd(q)||p.localeCompare(q)).forEach(sys=>{
+      const rows=bySys.get(sys), nc=rows.filter(r=>r[9]).length, drawn=rows.filter(r=>!r[9]&&r[4]>w0&&r[3]<w1);
+      const ends=[], placed=drawn.slice().sort((p,q)=>p[3]-q[3]||q[4]-p[4]).map(r=>{
+        const xa=x(r[3]); let k=ends.findIndex(v=>v<xa-1); if(k<0){ k=ends.length; ends.push(0); } ends[k]=x(r[4]); return [r,k]; });
+      const NT=Math.min(ends.length,AB_MAXROW), over=placed.filter(p=>p[1]>=AB_MAXROW).length, lab=ABAND_LABEL[sys]||sys;
+      const sub=[drawn.length?drawn.length+" not congruent":"",nc?nc+" congruent, not drawn":"",
+                 over?"+"+over+" beyond "+AB_MAXROW+" rows":""].filter(Boolean).join(" \u00b7 ");
+      lanes.push({label:"alias \u00b7 "+lab,sub,h:Math.max(NT*7+3,sub?26:12),draw:()=>{
+        if(!drawn.length) return lbl((x(co.start)+x(co.end))/2,9,"every "+lab+" interval here matches the locus extent (\u00b110 bp)",
+                                     "var(--mut)",8.5,"middle",true);
+        return placed.filter(p=>p[1]<AB_MAXROW).map(([r,k])=>{
+          const a=x(r[3]), b=x(r[4]), y0=k*7, w=Math.max(1.5,b-a), own=r[6]===1, oth=typeof r[6]==="string"&&r[6]?r[6]:"";
+          const col=own?"var(--ab-own)":oth?"var(--ab-oth)":"var(--ab-none)"; USED.add(own?"ab-own":oth?"ab-oth":"ab-none");
+          const len=r[4]-r[3], cid=oth&&typeof IDX!=="undefined"&&IDX&&IDX.uid2cid?(IDX.uid2cid[oth]||""):"";
+          const tp=card(r[1],[["naming system",lab],["position",co.chrom+":"+ivx(r[3],r[4])+(r[5]?" ("+r[5]+")":"")],["length",bpx(len)],
+            ["assigned to",own?"this locus":oth?(cid?cid+" ("+oth+")":oth):"no catalog locus (the interval only overlaps)"],
+            ["overlap with this locus\u2019s segments",bpx(r[8])+" \u2014 "+(len?Math.round(100*r[8]/len):0)+"% of the interval"],
+            ["parts",r[7]>1?r[7]+" intervals of this name, drawn as their extent":null],
+            ["clipped",r[3]<w0||r[4]>w1?"extends beyond the map window":null],
+            ["note",ABAND_NOTE[sys]||null],
+            ["source","alias_interval \u2014 the system\u2019s own coordinates (lifted to "+asm+" where the source is on another assembly)"]],col);
+          return own?rect(a,y0,w,5,col,tp)
+            :'<rect x="'+a+'" y="'+(y0+0.5)+'" width="'+w+'" height="4" rx="1" fill="'+col+'" fill-opacity="0.18" stroke="'+col+
+             '" stroke-width="0.9"'+(oth?' stroke-dasharray="3,1.5"':"")+tipA(tp)+'/>';
+        }).join(""); }});
+    });
+  }
   // RepeatMasker lane: both assemblies. Labels are length-aware and separated, same
   // rule as the domain lane -- a 300 bp Alu is ~4 px wide at this scale.
   if(reps.length)lanes.push({label:"RepeatMasker",h:15,draw:()=>{
@@ -1238,15 +1590,161 @@ async function drawLocus_(d,co,asm){
   const hp=isHg?"hg38_":"t2t_";
   const hv=(d.hvorf||[]).filter(o=>o[hp+"start"]!=null&&o[hp+"chrom"]===co.chrom&&o[hp+"end"]>w0&&o[hp+"start"]<w1);
   if(hv.length){ USED.add("hvo");
-    lanes.push({label:"HERVOminer ORFs",sub:"\u2265 81 aa",h:41,draw:()=>hv.map(o=>{
+    /* S46: ORFs that begin at the SAME 5' base are one feature to the reader -- the reference
+       ORF and any longer allelic form of it start together and differ only in where they stop --
+       so they share a single hovercard, and the length variation lives on that card rather than
+       on a separate tooltip over the hatch. Key on the 5' base, which is start on + and end on -. */
+    const key=o=>o[hp+"strand"]+":"+(o[hp+"strand"]==="+"?o[hp+"start"]:o[hp+"end"]);
+    const grp=new Map();
+    hv.forEach(o=>{const k=key(o); if(!grp.has(k)) grp.set(k,[]); grp.get(k).push(o);});
+    const extOf=o=>{const xr=(d.hvext||[]).find(e=>e.orf_id===o.orf_id); if(!xr) return null;
+      const ea=isHg?xr.ext_aa_hg38:xr.ext_aa;
+      return (ea!=null&&ea>o.aa_len)?{xr:xr,ea:ea}:null;};
+    /* One line per ORF: the reference length, then the SHORTEST and LONGEST forms that reach
+       EXT_AF in 1KGP -- a common nonsense allele truncates it, a common stop-loss extends it. */
+    const rowOf=o=>(d.hvext||[]).find(e=>e.orf_id===o.orf_id)||null;
+    const says=o=>{const xr=rowOf(o), e=extOf(o), parts=[];
+      if(xr&&xr.short_aa!=null&&xr.short_af>=EXT_AF)
+        parts.push("shortest "+xr.short_aa+" aa on "+(100*xr.short_af).toFixed(1)+"% (nonsense)");
+      if(e&&e.xr.af>=EXT_AF)
+        parts.push("longest "+e.ea+" aa on "+(100*e.xr.af).toFixed(1)+"% ("+e.xr.ac+"/"+e.xr.an+", stop-loss)");
+      if(parts.length) return o.aa_len+" aa in the reference \u00b7 "+parts.join(" \u00b7 ");
+      if(e) return o.aa_len+" aa \u2192 "+e.ea+" aa on "+(100*e.xr.af).toFixed(1)+
+        "% of alleles \u2014 below the "+(100*EXT_AF)+"% threshold";
+      return o.aa_len+" aa \u00b7 no common length variant in 1KGP";};
+    const cards={};
+    for(const [k,L] of grp){
+      L.sort((p,q)=>q.aa_len-p.aa_len);
+      const o0=L[0], st=o0[hp+"strand"];
+      const lo=Math.min(...L.map(o=>o[hp+"start"])), hi=Math.max(...L.map(o=>o[hp+"end"]));
+      const multi=L.length>1;
+      const rows=multi
+        ? [["ORFs starting here",L.length+" \u2014 same 5\u2032 base, different stops"],
+           ...L.map(o=>[o.orf_id,says(o)+(isHg&&o.geve_orf_id?" \u00b7 identical to gEVE "+o.geve_orf_id:"")])]
+        : [["length",says(o0)]];
+      rows.push(["position",co.chrom+":"+ivx(lo,hi)+" ("+st+")"]);
+      if(!multi) rows.push(["placed",o0[hp+"placement"]==="exact"?"exact sequence match":
+        "most similar stretch (identity "+Number(o0[hp+"identity"]).toFixed(3)+")"],
+        ["gEVE",isHg?(o0.geve_orf_id||"no identical gEVE ORF"):null]);
+      if(L.some(extOf)) rows.push(["length variation",
+        "1KGP on CHM13: a stop-loss allele abolishes the stop, so the ORF reads to the next in-frame stop"+
+        (isHg?"":" (extended length measured on this assembly)")]);
+      rows.push(...(isHg?covOrfRows(d,co,lo,hi):[]));
+      cards[k]=card(multi?L.length+" ORFs":o0.orf_id,rows,"var(--hvo)");
+    }
+    lanes.push({label:"ORFs \u2265 81 aa",sub:"HERVOminer",h:41,draw:()=>ORF_EXT_HATCH+hv.map(o=>{
       const s0=o[hp+"start"],s1=o[hp+"end"],st=o[hp+"strand"],fr=st==="+"?s0%3:s1%3,row=(st==="+"?0:3)+fr,y0=row*7;
       const a=x(Math.max(s0,w0)),b=x(Math.min(s1,w1));
-      const tp=card(o.orf_id,[["length",o.aa_len+" aa"],["position",co.chrom+":"+ivx(s0,s1)+" ("+st+")"],
-        ["placed",o[hp+"placement"]==="exact"?"exact sequence match":"most similar stretch (identity "+Number(o[hp+"identity"]).toFixed(3)+")"],
-        ["gEVE",isHg?(o.geve_orf_id||"no identical gEVE ORF"):null],...(isHg?covOrfRows(d,co,s0,s1):[])],"var(--hvo)");
-      const solid=isHg&&o.geve_orf_id;
-      return '<rect x="'+a+'" y="'+y0+'" width="'+Math.max(1,b-a)+'" height="5" fill="'+(solid?"var(--hvo)":"var(--pan)")+
-        '" stroke="var(--hvo)" stroke-width="0.8"'+(o[hp+"placement"]==="similar"?' stroke-dasharray="2,1.2"':"")+tipA(tp)+'/>';}).join("")});
+      const tp=cards[key(o)];
+      const sense=(co.strand||"+")===st;
+      let g='<rect x="'+a+'" y="'+y0+'" width="'+Math.max(1,b-a)+'" height="5" fill="'+(sense?"var(--hvo)":"var(--pan)")+
+        '" stroke="var(--hvo)" stroke-width="0.8"'+(o[hp+"placement"]==="similar"?' stroke-dasharray="2,1.2"':"")+tipA(tp)+'/>';
+      /* Hatch the extra span when the extending allele is at or above EXT_AF. It carries the
+         SAME card as the ORF it belongs to -- one feature, one hovercard. */
+      /* A common nonsense allele truncates the ORF: mark where the premature stop falls. */
+      const xrow=rowOf(o);
+      if(xrow&&xrow.short_aa!=null&&xrow.short_af>=EXT_AF){
+        const tp0=st==="+"?s0+xrow.short_aa*3:s1-xrow.short_aa*3;
+        if(tp0>w0&&tp0<w1){ g+=line(x(tp0),y0-1,x(tp0),y0+6,"var(--bad)",1.4); USED.add("hvtrunc"); }
+      }
+      const e=extOf(o);
+      if(e&&e.xr.af>=EXT_AF){
+        {
+          const ea=e.ea;
+          const extbp=(ea-o.aa_len)*3, e0=st==="+"?s1:s0-extbp, e1=st==="+"?s1+extbp:s0;
+          if(e1>w0&&e0<w1){
+            const ea0=x(Math.max(e0,w0)),eb0=x(Math.min(e1,w1));
+            g+='<rect x="'+ea0+'" y="'+y0+'" width="'+Math.max(1,eb0-ea0)+'" height="5" fill="url(#orfext)" '+
+              'stroke="var(--hvo)" stroke-width="0.8" stroke-dasharray="1.5,1.5"'+tipA(tp)+'/>';
+            USED.add("hvext");
+          }
+        }
+      }
+      return g;}).join("")});
+  }
+  /* S46b FALLBACK. HERVOminer covers only 3,115 loci (ERVmap-derived), so at 18,685 loci that do
+     carry reference ORFs >= 81 aa the lane above is absent entirely -- HML2_1q22, with a 1,459 aa
+     ORF, was one of them. Where there is no HERVOminer region we draw the six-frame scan of the
+     same extent in the SAME lane, so the lane never reads as "no ORFs here" when there are ORFs.
+     Shipped only for loci with no HERVOminer at all, so the two can never both appear. */
+  const sc=(d.hvscan||[]).filter(o=>o.asm===asm&&o.chrom===co.chrom&&o.end>w0&&o.start<w1);
+  if(!hv.length&&sc.length){ USED.add("hvo");
+    const skey=o=>o.strand+":"+(o.strand==="+"?o.start:o.end);
+    const sgrp=new Map();
+    sc.forEach(o=>{const k=skey(o); if(!sgrp.has(k)) sgrp.set(k,[]); sgrp.get(k).push(o);});
+    /* Same 1KGP stop-loss treatment as the HERVOminer half of the lane, so both say the same
+       kinds of things. var_status distinguishes "assessed, no stop-loss allele" from the cases
+       that could not be assessed at all -- an ORF running to the edge of the extent has no stop
+       to lose, and one whose stop codon does not lift to CHM13 has no 1KGP evidence either way. */
+    const SVAR={no_stop_in_extent:"runs to the edge of the locus extent \u2014 no stop codon to lose",
+      not_assessed_no_lift:"not assessed \u2014 the stop codon does not lift to CHM13",
+      not_assessed_codon_mismatch:"not assessed \u2014 the lifted CHM13 codon is not the same stop",
+      no_stop_loss_allele:"no longer form seen in 1KGP"};
+    const ssays=o=>{const parts=[];
+      if(o.short_aa!=null&&o.short_af>=EXT_AF)
+        parts.push("shortest "+o.short_aa+" aa on "+(100*o.short_af).toFixed(1)+"% (nonsense)");
+      if(o.vs==="extended"&&o.ext_aa!=null&&o.af>=EXT_AF)
+        parts.push("longest "+o.ext_aa+" aa on "+(100*o.af).toFixed(1)+"% ("+o.ac+"/"+o.an+", stop-loss)");
+      if(parts.length) return o.aa_len+" aa in the reference \u00b7 "+parts.join(" \u00b7 ");
+      if(o.vs==="extended"&&o.ext_aa!=null)
+        return o.aa_len+" aa \u2192 "+o.ext_aa+" aa on "+(100*o.af).toFixed(1)+
+          "% of alleles \u2014 below the "+(100*EXT_AF)+"% threshold";
+      return o.aa_len+" aa \u00b7 "+(SVAR[o.vs]||"length variation not assessed");};
+    const scards={};
+    for(const [k,L] of sgrp){
+      L.sort((p,q)=>q.aa_len-p.aa_len);
+      const o0=L[0], lo=Math.min(...L.map(o=>o.start)), hi=Math.max(...L.map(o=>o.end)), multi=L.length>1;
+      const rows=multi?[["ORFs starting here",L.length+" \u2014 same 5\u2032 base, different stops"],
+                        ...L.map(o=>[o.sid,ssays(o)])]
+                     :[["length",ssays(o0)]];
+      rows.push(["position",co.chrom+":"+ivx(lo,hi)+" ("+o0.strand+")"],
+        ["source","six-frame scan of this locus extent (stop-to-stop, \u2265 81 aa)"],
+        ["HERVOminer","region not annotated"]);
+      if(L.some(o=>o.vs==="extended")) rows.push(["length variation",
+        "1KGP on CHM13: a stop-loss allele abolishes the stop, so the ORF reads to the next in-frame "+
+        "stop (extended length measured on this assembly)"]);
+      rows.push(...(isHg?covOrfRows(d,co,lo,hi):[]));
+      scards[k]=card(multi?L.length+" ORFs":o0.sid,rows,"var(--hvo)");
+    }
+    lanes.push({label:"ORFs \u2265 81 aa",sub:"six-frame scan \u2014 no HERVOminer here",h:41,draw:()=>ORF_EXT_HATCH+sc.map(o=>{
+      const fr=o.strand==="+"?o.start%3:o.end%3,row=(o.strand==="+"?0:3)+fr,y0=row*7;
+      const a=x(Math.max(o.start,w0)),b=x(Math.min(o.end,w1)),tp=scards[skey(o)];
+      const ssense=(co.strand||"+")===o.strand;
+      let g='<rect x="'+a+'" y="'+y0+'" width="'+Math.max(1,b-a)+'" height="5" fill="'+(ssense?"var(--hvo)":"var(--pan)")+
+        '" stroke="var(--hvo)" stroke-width="0.8" stroke-dasharray="3,1"'+tipA(tp)+'/>';
+      if(o.short_aa!=null&&o.short_af>=EXT_AF){
+        const tp0=o.strand==="+"?o.start+o.short_aa*3:o.end-o.short_aa*3;
+        if(tp0>w0&&tp0<w1){ g+=line(x(tp0),y0-1,x(tp0),y0+6,"var(--bad)",1.4); USED.add("hvtrunc"); }
+      }
+      if(o.vs==="extended"&&o.af>=EXT_AF&&o.ext_aa>o.aa_len){
+        const extbp=(o.ext_aa-o.aa_len)*3, e0=o.strand==="+"?o.end:o.start-extbp,
+              e1=o.strand==="+"?o.end+extbp:o.start;
+        if(e1>w0&&e0<w1){
+          const ea0=x(Math.max(e0,w0)),eb0=x(Math.min(e1,w1));
+          g+='<rect x="'+ea0+'" y="'+y0+'" width="'+Math.max(1,eb0-ea0)+'" height="5" fill="url(#orfext)" '+
+            'stroke="var(--hvo)" stroke-width="0.8" stroke-dasharray="1.5,1.5"'+tipA(tp)+'/>';
+          USED.add("hvext");
+        }
+      }
+      return g;}).join("")});
+  }
+  /* S46 ORF pass 2: ORFs >= 81 aa seen in HPRC haplotype assemblies that overlap NO reference
+     ORF at this locus and strand, i.e. absent from the reference annotation entirely. Same
+     6-row strand x frame layout as the lane above, in a different hue to mark the source. */
+  const nvAll=(d.hvnovel||[]).filter(o=>o.asm===asm&&o.chrom===co.chrom&&o.end>w0&&o.start<w1);
+  if(nvAll.length){ USED.add("hvn");
+    lanes.push({label:"Novel ORFs (HPRC)",sub:"\u2265 81 aa, not in reference",h:41,draw:()=>nvAll.map(o=>{
+      const s0=o.start,s1=o.end,st=o.strand,fr=st==="+"?s0%3:s1%3,row=(st==="+"?0:3)+fr,y0=row*7;
+      const a=x(Math.max(s0,w0)),b=x(Math.min(s1,w1)),pct=(100*o.frac).toFixed(1);
+      const tp=card(o.nid,[["length",o.aa_len+" aa"],["position",co.chrom+":"+ivx(s0,s1)+" ("+st+")"],
+        ["present in",o.nhp+" of "+o.nha+" haplotypes assessed ("+pct+"%)"],
+        ["source","HPRC release 2 assemblies \u2014 six-frame scan of this locus extent"],
+        ["why it is not in the reference","no reference ORF \u2265 81 aa overlaps this span on this strand; "+
+          "the reference carries at least one stop codon here"]],"var(--hvn)");
+      /* opacity carries frequency so a near-fixed novel ORF reads differently from a rare one */
+      const op=(0.35+0.65*Math.min(1,o.frac/0.5)).toFixed(2);
+      return '<rect x="'+a+'" y="'+y0+'" width="'+Math.max(1,b-a)+'" height="5" fill="var(--hvn)" fill-opacity="'+op+
+        '" stroke="var(--hvn)" stroke-width="0.8"'+tipA(tp)+'/>';}).join("")});
   }
   // collapse isoforms to one lane per gene: union of exons, widest tx extent.
   // Drawing 6 lanes of the same gene wastes vertical space and hides whether any exon is in view.
@@ -1397,9 +1895,21 @@ async function drawLocus_(d,co,asm){
       laneLabel(L-6,10,ln.label,"var(--mut)",10.5,L-6)+
       (ln.sub?lbl(L-6,23,ln.sub,"var(--mut)",9.5,"end",true):"")+MIR(ln.draw())+"</g>";
     y+=ln.h+5;});
-  // locus extent guides + axis
-  const guides=line(XM(co.start),0,XM(co.start),y,"var(--guide)",1,"2,2")+
-               line(XM(co.end),0,XM(co.end),y,"var(--guide)",1,"2,2");
+  // locus extent guides + axis. For an insertion locus the "locus" is an empty anchor, so the
+  // span between the guides is greyed across the whole lane stack: that band is the gap the
+  // element occupies in a carrier and occupies in neither reference, and greying it is what
+  // separates "nothing annotated here" from "nothing here". A 6 bp anchor is under 3 px at
+  // this scale, so the band is widened to 7 px to stay visible between the flanking repeats.
+  const _ins=pol&&pol.kind==="insertion";
+  const guides=(_ins?(()=>{const a=Math.min(XM(co.start),XM(co.end)),b=Math.max(XM(co.start),XM(co.end)),
+      w=Math.max(7,b-a), m=(a+b)/2;
+    return '<rect x="'+(m-w/2)+'" y="0" width="'+w+'" height="'+y+'" fill="var(--rep-low)" '+
+      'fill-opacity="0.38" stroke="var(--guide)" stroke-width="0.6"'+tipA(card("insertion site",
+      [["position",co.chrom+":"+ivx(co.start,co.end)],["anchor",bpx(co.end-co.start)],
+       ["element here","absent from "+asm],
+       ["note","the element is drawn above, on its own axis"]]))+"/>";})():"")+
+    line(XM(co.start),0,XM(co.start),y,"var(--guide)",1,"2,2")+
+    line(XM(co.end),0,XM(co.end),y,"var(--guide)",1,"2,2");
   let axis=line(L,y+4,W-R,y+4,"var(--axis)",1);
   const ticks=5;
   // edge ticks anchor inward: a centred label at the last tick overflows the viewBox
@@ -1411,9 +1921,10 @@ async function drawLocus_(d,co,asm){
   axis+=lbl(L,y+35,asm+" "+co.chrom+"  ·  window "+(w1-w0).toLocaleString()+" bp  ·  locus "+
         (co.end-co.start).toLocaleString()+" bp"+(FLIP?"  ·  \u2190 coordinates decrease left to right (\u2212 strand, drawn 5\u2032\u21923\u2032)":
         co.strand==="+"?"  ·  + strand, drawn 5\u2032\u21923\u2032":""),"var(--mut)",10.5,"start",true);
-  const LEG=[["ltr","ERV LTR"],["int","ERV internal"],["orf","gEVE ORF"],["dom","HERVarium domain"],
+  const LEG=[["ltr","ERV LTR"],["int","ERV internal"],["ab-own","alias interval assigned to this locus"],["ab-oth","alias interval assigned to another locus (dashed; m:n)"],["ab-none","alias interval assigned to no locus"],["orf","gEVE ORF"],["dom","HERVarium domain"],
     ["u3","U3"],["rr","R"],["u5","U5 (HERVarium; dashed outline = low-confidence call)"],
-    ["hvo","HERVOminer ORF \u2265 81 aa (solid = identical gEVE ORF; dashed = placed by similarity)"],
+    ["hvo","ORF \u2265 81 aa \u2014 solid on the element\u2019s own strand, hollow antisense; dashed outline = six-frame scan (no HERVOminer region); hatched = allelic extension past the reference stop"],
+    ["hvn","Novel ORF \u2265 81 aa seen in HPRC haplotypes, absent from the reference (shade = carrier frequency)"],
     ["gene","gene exon / intron"],["cage","FANTOM5 CAGE peak (open = antisense)"],["rep-line","LINE"],
     ["rep-sine","SINE"],["rep-dna","DNA"],["rep-other","other TE"],["rep-low","simple / low complexity"],
     ["map1","uniquely mappable"],["ccle","CCLE 31-mer segment (darker = detected in more cell lines)"],
@@ -1439,7 +1950,7 @@ async function drawLocus_(d,co,asm){
     "and features on the + strand point left":"+ strand: genomic coordinates increase to the right")+
     "). Every locus is oriented this way, so elements of one group line up.</div>":
     '<div class="orient">Strand unknown \u2014 drawn in genomic orientation.</div>';
-  $("gfx").innerHTML=ORI+(isHg&&d.cov&&d.cv&&d.pf?covCtl(d):"")+'<svg viewBox="0 -6 '+W+" "+(y+50)+'" width="'+W+'">'+guides+body+axis+"</svg>"+legend+
+  $("gfx").innerHTML=ORI+abCtl(d,asm)+(isHg&&d.cov&&d.cv&&d.pf?covCtl(d):"")+'<svg viewBox="0 -6 '+W+" "+(y+50)+'" width="'+W+'">'+guides+body+axis+"</svg>"+legend+
     (gmodels.length?"":'<div class="note">no '+(isHg?"GENCODE":"RefSeq")+
       ' transcript in this window'+
       (GA.includes(asm)?"":" (no "+asm+" gene models in bundle)")+"</div>")+
@@ -1604,6 +2115,26 @@ function rnaAtlasPanel(d){
 // d.cov: uint8 codes, groups x bins (page group order), bins of 100 bp from co.start+pf[0];
 // value = 0.01 (2^(c/12) - 1) mean coverage per base per 1e9 aligned bases (all reads).
 let COV={mode:"det",sel:{}}, LASTDRAW=null;
+// Alias band (D68): toggle above the locus map, remembered across loci (localStorage when available).
+let ALIASBAND=(()=>{ try{ return localStorage.getItem("herv.aliasband")==="1"; }catch(e){ return false; } })();
+const AB_MAXROW=6;
+const ABAND_LABEL={telescope:"Telescope",ervmap:"ERVmap",hervarium:"HERVarium",geve:"gEVE ORF",ervnavigator:"ERV Navigator",
+  hervd:"HERVd v3",hervd_atlas:"HervD Atlas",hervquant_id:"hervQuant",wang2014_hervh_id:"Wang 2014 HERVH",
+  subramanian:"Subramanian 2011",kyriakou2025:"Kyriakou 2025",coffin2026:"Coffin 2026",
+  grandi_hml6_name:"Grandi HML-6",grandi_hml10_name:"Grandi HML-10",grandi_hervw_name:"Grandi HERV-W"};
+// Per-system caveats shown on every interval card of that system.
+const ABAND_NOTE={coffin2026:"Coffin 2026 Source_Identifier spans are extraction windows that include host flank "+
+  "(median \u2248525 bp past each end on GRCh38, \u2248240 bp on CHM13), so these bars are wider than the element by design"};
+const AB_ORDER=Object.keys(ABAND_LABEL), abOrd=s=>{ const i=AB_ORDER.indexOf(s); return i<0?99:i; };
+function aliasBandToggle(on){ ALIASBAND=!!on; try{ localStorage.setItem("herv.aliasband",on?"1":"0"); }catch(e){} covRedraw(); }
+function abCtl(d,asm){
+  const R=(d.aiv||[]).filter(r=>r[2]===asm); if(!R.length) return "";
+  const nn=R.filter(r=>!r[9]).length, ns=new Set(R.map(r=>r[0])).size, nm=R.filter(r=>typeof r[6]==="string"&&r[6]).length;
+  return '<div class="abctl note"><label title="draw each naming system\u2019s own interval for aliases that sit on or touch this locus '+
+    'but do not match its extent (\u00b110 bp) \u2014 m:n and offset assignments"><input type="checkbox" class="abtog"'+(ALIASBAND?" checked":"")+
+    ' onchange="aliasBandToggle(this.checked)"> alias band</label> \u2014 '+R.length+" alias interval"+(R.length===1?"":"s")+" from "+ns+
+    " naming system"+(ns===1?"":"s")+"; "+nn+" not congruent with the locus extent"+(nm?", "+nm+" assigned to another locus":"")+"</div>";
+}
 const COV_KIND={"GTEx normal":0,"TCGA adjacent normal":1,"TCGA tumour":2,"TCGA metastatic":2,"cell line (CCLE)":3};
 const COV_RAMP=["#fcfdbf","#fed395","#fea772","#f7705c","#de4968","#b73779","#8c2981","#641a80","#3b0f70","#140e36"];
 const COV_LINE=["#D55E00","#0072B2","#009E73","#CC79A7","#E69F00","#56B4E9","#1b1b1f","#999999"];
@@ -1637,6 +2168,11 @@ function covUniq(d,co){
 }
 // Two hatches (2026-10-09): over the heat map only thin lines, no wash, so the cell colours keep
 // their value; over the coverage tracks the white wash stays (it does not change a line's value).
+/* S46: hatch for the stop-loss extension drawn past a HERVOminer ORF's reference stop, and the
+   allele-frequency floor above which it is drawn at all (the user's 5% threshold). */
+const EXT_AF=0.05;
+const ORF_EXT_HATCH='<defs><pattern id="orfext" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'+
+  '<rect width="4" height="4" fill="#ffffff"/><line x1="0" y1="0" x2="0" y2="4" stroke="var(--hvo)" stroke-width="1.4"/></pattern></defs>';
 const COV_HATCH='<defs><pattern id="covhatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'+
   '<rect width="4" height="4" fill="#ffffff" fill-opacity="0.35"/><line x1="0" y1="0" x2="0" y2="4" stroke="#3a3a3a" stroke-width="1.1" stroke-opacity="0.55"/></pattern>'+
   '<pattern id="covhatchl" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'+

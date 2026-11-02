@@ -6,7 +6,7 @@
 <style>
  :root{--ink:#1b1b1f;--mut:#6b6b76;--line:#dcdce3;--bg:#fbfbfd;--pan:#fff;
 }
- :root{--ccle:#6A3D9A;--cage:#8A5A00;--ltr:#0072B2;--int:#C45000;--orf:#00855C;--hvo:#00855C;--u3:#A9CDEB;--rr:#0072B2;--u5:#5B9BD5;--dom:#AA5987;--gene:#1F2937;--rep-line:#F2C77A;--rep-sine:#A9D4F0;--rep-dna:#E6E08A;--rep-other:#E8C5DC;--rep-low:#DCDCE0;--on-strong:#ffffff;--on-rep:#2A2A33;--map1:#8F9AA8;--map2:#8F9AA8;--maptrack:#EEF0F3;--tss3:#005F48;--tss2:#009E73;--tss1:#8CD3BE;--jx-cross:#E69F00;--jx-within:#3B3B98;--jx-edge:#56B4E9;--jx-span:#A3ABB5;--jx-anti:#A3A3AD;--jx-any:#5F6B78;--guide:#AEB8C4;--axis:#9AA0A8;--cat1:#0072B2;--cat2:#D55E00;--cat3:#009E73;--cat4:#CC79A7;--cat5:#E69F00;--cat6:#56B4E9;--ok:#009E73;--bad:#D55E00;--neutral:#8A8A92;--acc:#1F4E79}
+ :root{--ab-own:#E69F00;--ab-oth:#D55E00;--ab-none:#9A9A9A;--ccle:#6A3D9A;--cage:#8A5A00;--ltr:#0072B2;--int:#C45000;--orf:#00855C;--hvo:#00855C;--hvn:#0E7C86;--u3:#A9CDEB;--rr:#0072B2;--u5:#5B9BD5;--dom:#AA5987;--gene:#1F2937;--rep-line:#F2C77A;--rep-sine:#A9D4F0;--rep-dna:#E6E08A;--rep-other:#E8C5DC;--rep-low:#DCDCE0;--on-strong:#ffffff;--on-rep:#2A2A33;--map1:#8F9AA8;--map2:#8F9AA8;--maptrack:#EEF0F3;--tss3:#005F48;--tss2:#009E73;--tss1:#8CD3BE;--jx-cross:#E69F00;--jx-within:#3B3B98;--jx-edge:#56B4E9;--jx-span:#A3ABB5;--jx-anti:#A3A3AD;--jx-any:#5F6B78;--guide:#AEB8C4;--axis:#9AA0A8;--cat1:#0072B2;--cat2:#D55E00;--cat3:#009E73;--cat4:#CC79A7;--cat5:#E69F00;--cat6:#56B4E9;--ok:#009E73;--bad:#D55E00;--neutral:#8A8A92;--acc:#1F4E79}
  *{box-sizing:border-box}
  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
       color:var(--ink);background:var(--bg)}
@@ -216,6 +216,15 @@
  footer#refs summary{cursor:pointer;font-weight:600;color:var(--mut)}
  footer#refs h3{font-size:12.5px;margin:12px 0 4px} footer#refs ul{margin:0;padding-left:18px}
  footer#refs li{margin:2px 0;line-height:1.4} footer#refs .ru{color:var(--mut)}
+
+/* Browse is wide: hold the header row and the locus column in place while scrolling.
+   The sticky column needs its own background or rows scroll through underneath it. */
+#btab{overflow:auto;max-height:78vh}
+#btab table{border-collapse:separate;border-spacing:0}
+#btab thead th{position:sticky;top:0;z-index:3;background:var(--bg);box-shadow:inset 0 -1px 0 var(--line)}
+#btab tbody td:first-child,#btab thead th:first-child{position:sticky;left:0;z-index:2;
+  background:var(--bg);box-shadow:inset -1px 0 0 var(--line)}
+#btab thead th:first-child{z-index:4}
 </style>
 </head>
 <body>
@@ -235,13 +244,14 @@
 </header>
 <main><div id="view"><div class="empty">Pick a system and start typing to find a locus.</div></div></main>
 <!-- REFS -->
-<footer id="refs"><details><summary>Data sources and citations (42)</summary>
+<footer id="refs"><details><summary>Data sources and citations (54)</summary>
 <p class="note" style="font-style:normal">This browser combines the public resources below. If you use it, please cite the resources behind the data you rely on. The full list, including tools used only in the analyses, is <code>REFERENCES.md</code> in the export.</p>
 <h3>HERV and repeat annotation</h3><ul>
 <li>Bendall et al. (2019) Telescope: Characterization of the retrotranscriptome by accurate estimation of transposable element expression. <i>PLoS Comput Biol</i> 15:e1006453. <a href="https://doi.org/10.1371/journal.pcbi.1006453">doi:10.1371/journal.pcbi.1006453</a> <span class="ru">— Telescope retro.hg38 annotation (locus anchor) and method of the CCLE Telescope TPM readout</span></li>
 <li>Tokuyama et al. (2018) ERVmap analysis reveals genome-wide transcription of human endogenous retroviruses. <i>PNAS</i> 115:12565-12572. <a href="https://doi.org/10.1073/pnas.1814589115">doi:10.1073/pnas.1814589115</a> <span class="ru">— ERVmap proviral loci</span></li>
 <li>Nakagawa &amp; Takahashi (2016) gEVE: a genome-based endogenous viral element database provides comprehensive viral protein-coding sequences in mammalian genomes. <i>Database</i> 2016:baw087. <a href="https://doi.org/10.1093/database/baw087">doi:10.1093/database/baw087</a> <span class="ru">— gEVE loci and ORFs (map lane)</span></li>
-<li>Li et al. (2024) HervD Atlas: a curated knowledgebase of associations between human endogenous retroviruses and diseases. <i>Nucleic Acids Res</i> 52:D1315-D1326. <a href="https://doi.org/10.1093/nar/gkad904">doi:10.1093/nar/gkad904</a> <span class="ru">— HervD Atlas HERV terms and elements</span></li>
+<li>Li et al. (2024) HervD Atlas: a curated knowledgebase of associations between human endogenous retroviruses and diseases. <i>Nucleic Acids Res</i> 52:D1315-D1326. <a href="https://doi.org/10.1093/nar/gkad904">doi:10.1093/nar/gkad904</a> <span class="ru">— HervD Atlas HERV-Terms and HERV-Elements (alias types hervd_atlas_*)</span></li>
+<li>Pačes J et al. (2002) HERVd: database of human endogenous retroviruses. <i>Nucleic Acids Res</i> 30:205-206. <a href="https://doi.org/10.1093/nar/30.1.205">doi:10.1093/nar/30.1.205</a> <span class="ru">— HERVd v3 entity ids (hervd_id, ERV_&lt;n&gt;)</span></li>
 <li>Vargiu et al. (2016) Classification and characterization of human endogenous retroviruses; mosaic forms are common. <i>Retrovirology</i> 13:7. <a href="https://doi.org/10.1186/s12977-015-0232-y">doi:10.1186/s12977-015-0232-y</a> <span class="ru">— RetroTector HERV classification (Vargiu et al. supplement)</span></li>
 <li>Sperber et al. (2007) Automated recognition of retroviral sequences in genomic data—RetroTector©. <i>Nucleic Acids Res</i> 35:4964-4976. <a href="https://doi.org/10.1093/nar/gkm515">doi:10.1093/nar/gkm515</a> <span class="ru">— RetroTector program</span></li>
 <li>Montserrat-Ayuso et al. (2026) A comprehensive annotation of conserved protein domains in human endogenous retroviruses. <i>NAR Genom Bioinform</i> 8:lqag013. <a href="https://doi.org/10.1093/nargab/lqag013">doi:10.1093/nargab/lqag013</a> <span class="ru">— HERVarium conserved protein domains (map lane)</span></li>
@@ -255,6 +265,16 @@
 <li>Gifford et al. (2018) Nomenclature for endogenous retrovirus (ERV) loci. <i>Retrovirology</i> 15:59. <a href="https://doi.org/10.1186/s12977-018-0442-1">doi:10.1186/s12977-018-0442-1</a> <span class="ru">— ERV locus nomenclature conventions</span></li>
 <li>Seal et al. (2023) Genenames.org: the HGNC resources in 2023. <i>Nucleic Acids Res</i> 51:D1003-D1009. <a href="https://doi.org/10.1093/nar/gkac888">doi:10.1093/nar/gkac888</a> <span class="ru">— HGNC ERV gene symbols (aliases)</span></li>
 <li>Smit AFA, Hubley R, Green P. RepeatMasker Open-4.0. 2013–2015. <a href="http://www.repeatmasker.org">repeatmasker.org</a> <span class="ru">— RepeatMasker annotation (UCSC rmsk, hg38 and hs1; map lane)</span></li>
+<li>Mayer, Blomberg &amp; Seal (2011) A revised nomenclature for transcribed human endogenous retroviral loci. <i>Mobile DNA</i> 2:7. <a href="https://doi.org/10.1186/1759-8753-2-7">doi:10.1186/1759-8753-2-7</a> <span class="ru">&mdash; HGNC ERV symbols (ERVK-1 &hellip;) and legacy names (ERVWE1, HERV-K18 &hellip;)</span></li>
+<li>Smith et al. (2018) Endogenous retroviral signatures predict immunotherapy response in clear cell renal cell carcinoma. <i>J Clin Invest</i> 128:4804-4820. <a href="https://doi.org/10.1172/jci121476">doi:10.1172/jci121476</a> <span class="ru">&mdash; hervQuant locus ids (herv_&lt;RVNR&gt;)</span></li>
+<li>Wang et al. (2014) Primate-specific endogenous retrovirus-driven transcription defines naive-like stem cells. <i>Nature</i> 516:405-409. <a href="https://doi.org/10.1038/nature13804">doi:10.1038/nature13804</a> <span class="ru">&mdash; HERV-H locus ids HERVH_1&ndash;1225</span></li>
+<li>Grandi et al. (2016) Contribution of type W human endogenous retroviruses to the human genome: characterization of HERV-W proviral insertions and processed pseudogenes. <i>Retrovirology</i> 13:67. <a href="https://doi.org/10.1186/s12977-016-0301-x">doi:10.1186/s12977-016-0301-x</a> <span class="ru">&mdash; HERV-W locus names</span></li>
+<li>Grandi et al. (2017) Identification of a novel HERV-K(HML10): comprehensive characterization and comparative analysis in non-human primates provide insights about HML10 proviruses structure and diffusion. <i>Mobile DNA</i> 8:15. <a href="https://doi.org/10.1186/s13100-017-0099-7">doi:10.1186/s13100-017-0099-7</a> <span class="ru">&mdash; HML-10 locus names</span></li>
+<li>Pisano et al. (2019) Comprehensive characterization of the human endogenous retrovirus HERV-K(HML-6) group: overview of structure, phylogeny, and contribution to the human genome. <i>J Virol</i> 93:e00110-19. <a href="https://doi.org/10.1128/jvi.00110-19">doi:10.1128/jvi.00110-19</a> <span class="ru">&mdash; HML-6 locus names</span></li>
+<li>Kyriakou &amp; Magiorkinis (2025) Compilation of all known HERV-K HML-2 proviral integrations. <i>Mobile DNA</i> 16:21. <a href="https://doi.org/10.1186/s13100-025-00359-8">doi:10.1186/s13100-025-00359-8</a> <span class="ru">&mdash; HML-2 names in the band[NNN] scheme</span></li>
+<li>Jin et al. (2015) TEtranscripts: a package for including transposable elements in differential expression analysis of RNA-seq datasets. <i>Bioinformatics</i> 31:3593-3599. <a href="https://doi.org/10.1093/bioinformatics/btv422">doi:10.1093/bioinformatics/btv422</a> <span class="ru">&mdash; TElocal element keys (coordinate search)</span></li>
+<li>Rodr&iacute;guez-Quiroz &amp; Valdebenito-Maturana (2022) SoloTE for improved analysis of transposable elements in single-cell RNA-Seq data using locus-specific expression. <i>Commun Biol</i> 5:1063. <a href="https://doi.org/10.1038/s42003-022-04020-5">doi:10.1038/s42003-022-04020-5</a> <span class="ru">&mdash; SoloTE locus strings (coordinate search)</span></li>
+<li>Yang et al. (2019) SQuIRE reveals locus-specific regulation of interspersed repeat expression. <i>Nucleic Acids Res</i> 47:e27. <a href="https://doi.org/10.1093/nar/gky1301">doi:10.1093/nar/gky1301</a> <span class="ru">&mdash; SQuIRE locus strings (coordinate search)</span></li>
 </ul>
 <h3>Genomes, gene models, mappability</h3><ul>
 <li>Nurk et al. (2022) The complete sequence of a human genome. <i>Science</i> 376:44-53. <a href="https://doi.org/10.1126/science.abj6987">doi:10.1126/science.abj6987</a> <span class="ru">— T2T-CHM13 (hs1) assembly</span></li>
@@ -265,6 +285,10 @@
 <li>Morales et al. (2022) A joint NCBI and EMBL-EBI transcript set for clinical genomics and research. <i>Nature</i> 604:310-315. <a href="https://doi.org/10.1038/s41586-022-04558-8">doi:10.1038/s41586-022-04558-8</a> <span class="ru">— MANE Select transcripts (host-gene context)</span></li>
 <li>Karimzadeh et al. (2018) Umap and Bismap: quantifying genome and methylome mappability. <i>Nucleic Acids Res</i>. <a href="https://doi.org/10.1093/nar/gky677">doi:10.1093/nar/gky677</a> <span class="ru">— Umap k100 mappability (map lane)</span></li>
 <li>Li (2025) Finding easy regions for short-read variant calling from pangenome data. <i>GigaScience</i> 14:giaf103. <a href="https://doi.org/10.1093/gigascience/giaf103">doi:10.1093/gigascience/giaf103</a> <span class="ru">— Panmask pm151 easy regions (map lane, junction anchors)</span></li>
+</ul>
+<h3>Pangenome structural polymorphism</h3><ul>
+<li>Liao et al. (2023) A draft human pangenome reference. <i>Nature</i> 617:312-324. <a href="https://doi.org/10.1038/s41586-023-05896-x">doi:10.1038/s41586-023-05896-x</a> <span class="ru">&#8212; Human Pangenome Reference Consortium; the 464 release-2 haplotype assemblies (232 donors) behind every structural-polymorphism call, copy-number state and non-reference insertion in this browser</span></li>
+<li>Murimi-Worstell, Freeman, Minkina, Vollger, Stergachis &amp; Coffin (2026) Structural polymorphism and population-variable coding capacity of HERV-K(HML-2) in human pangenomes. <i>bioRxiv</i> (preprint, posted 28 September 2026). <a href="https://doi.org/10.64898/2026.09.22.753638">doi:10.64898/2026.09.22.753638</a> <span class="ru">&#8212; prior and independent work. The HML-2 structural polymorphism reported here was replicated against this preprint, and its findings were used to validate the QC thresholds applied catalog-wide; none of that analysis is claimed as original to this browser</span></li>
 </ul>
 <h3>Expression, splicing and TSS evidence</h3><ul>
 <li>Russ &amp; Iordanskiy (2025) Strict retroelement regulation is frequently lost following cancer transformation and generates a promising reservoir of cancer biomarkers. <i>Mobile DNA</i> 16:37. <a href="https://doi.org/10.1186/s13100-025-00376-7">doi:10.1186/s13100-025-00376-7</a> <span class="ru">— CCLE and RNA Atlas Telescope TPM readouts (RetroelementDB; https://retroelementdb.com/)</span></li>
@@ -289,12 +313,13 @@
 <!-- /REFS -->
 
 <script>
-/*buildstamp*/const BUILD="7bc0fae452e4";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
+/*buildstamp*/const BUILD="608fd425dc5e";if(typeof window!=="undefined"&&window.fetch){const _f=window.fetch.bind(window);window.fetch=(u,o)=>_f(typeof u==="string"&&/^data\//.test(u)?u+(u.includes("?")?"&":"?")+"v="+BUILD:u,o);}/*/buildstamp*/
 const MAXSHOW=20, IDENT_LABEL={combined_id:"combined_id (positional)",versioned_id:"versioned_id (with version)",
   telescope_id:"telescope_id",hervd_id:"HERVd ID",ervmap_id:"ERVmap ID",ervmap_alt_name:"ERVmap alt name",
   subramanian_id:"Subramanian 2011 locus (HML-2)",hml2_k_number:"HML-2 K-number (Subramanian)",
-  hml2_k_designation:"HML-2 K-designation (Subramanian)",hgnc_ervk_symbol:"HGNC ERVK symbol",hml2_tandem_name:"HML-2 tandem name",hgnc_erv_symbol:"HGNC ERV gene (GENCODE v50 overlap)",hervarium_id:"HERVarium internal element",hervarium_ltr_id:"HERVarium LTR",hervominer_id:"HERVOminer locus",
-  missillac_id:"Missillac ID (ERV Navigator)",rbrt_id:"RBRT ID (ERV Navigator legacy)"};
+  hml2_k_designation:"HML-2 K-designation (Subramanian)",hgnc_ervk_symbol:"HGNC ERVK symbol",hml2_tandem_name:"HML-2 tandem name",hgnc_erv_symbol:"HGNC ERV symbol",hervarium_id:"HERVarium internal element",hervarium_ltr_id:"HERVarium LTR",hervominer_id:"HERVOminer locus",
+  missillac_id:"Missillac ID (ERV Navigator)",rbrt_id:"RBRT ID (ERV Navigator legacy)",
+  retrotector_rvnr:"RetroTector RVNR (Vargiu 2016)",hervd_entity_id:"HERVd entity (ERV_<n>)",hervquant_id:"hervQuant locus (herv_<n>)",wang2014_hervh_id:"Wang 2014 HERV-H locus",grandi_hml6_name:"Grandi HML-6 locus",grandi_hml10_name:"Grandi 2017 HML-10 locus",grandi_hervw_name:"Grandi 2016 HERV-W locus",kyriakou2025_name:"Kyriakou 2025 HML-2 locus",coffin2026_name:"Coffin lab 2026 HML-2 locus",hervd_atlas_term_id:"HervD Atlas HERV-Term",hervd_atlas_term_name:"HervD Atlas term name (band-first)",hervd_atlas_element_id:"HervD Atlas HERV-Element",legacy_name:"legacy / literature name",genbank_accession:"GenBank accession",hgnc_id:"HGNC ID",ncbi_gene_id:"NCBI Gene ID"};
 const NAV_URL="https://ervnavigator.fredhutch.org/locus/";
 const CLASS_LABEL={dfam_int_model:"Dfam internal model",dfam_accession:"Dfam accession",repbase_name:"RepBase name"};
 let IDX=null, NB=400, shardCache=new Map(), curSel=-1, curList=[];
@@ -382,6 +407,11 @@ async function boot_(){
   for(const t of IDX.meta.class_types){const o=document.createElement("option");o.value="c:"+t;
     o.textContent=(CLASS_LABEL[t]||t)+"  ("+Object.keys(IDX.classifier[t]).length.toLocaleString()+")";g2.appendChild(o);}
   ks.appendChild(g1);ks.appendChild(g2);
+  // coordinate keyspace (D68): overlap search; its index is fetched on first use
+  const gx=document.createElement("optgroup"); gx.label="Coordinates \u2014 resolves by overlap";
+  const ox=document.createElement("option"); ox.value="x:coord";
+  ox.textContent="Coordinate span / element key  (chr:start-end, BED, gEVE, SoloTE/SQuIRE, TElocal)";
+  gx.appendChild(ox); ks.appendChild(gx);
 
   // Internal joining key, last and opt-in. Deliberately excluded from fuzzy
   // search: 96.6% of locus_uids carry a HERVL prefix while belonging to some
@@ -663,7 +693,17 @@ function browseCols(){
    ["kmer","CCLE 31-mer","share of "+B.n_lines_kmer.toLocaleString()+" CCLE lines with the body detected by locus-unique 31-mers",i=>nz(R[i][c.pct_ccle_kmer]),i=>pct(R[i][c.pct_ccle_kmer]),1],
    ["tn","tumour > normal","TCGA projects (matched pairs) in which the locus is called higher in tumour",i=>nz(R[i][c.n_tn_higher]),i=>num(R[i][c.n_tn_higher]),1],
    ["strand","own strand","stranded pilot (ENCODE tissue + Blueprint blood): \u2605 element-strand candidate (intronic, host antisense, own-strand signal > 4\u00d7 its flanks); \u2022 own-strand expressed in \u2265 2 stranded samples",
-     i=>c.strand_class==null?null:R[i][c.strand_class],i=>c.strand_class==null?"":R[i][c.strand_class]===2?'<span class="escand" title="element-strand candidate">\u2605</span>':R[i][c.strand_class]===1?"\u2022":"",1]];
+     i=>c.strand_class==null?null:R[i][c.strand_class],i=>c.strand_class==null?"":R[i][c.strand_class]===2?'<span class="escand" title="element-strand candidate">\u2605</span>':R[i][c.strand_class]===1?"\u2022":"",1],
+   // Pangenome polymorphism (S35). Both columns are absent from older builds, so every read
+   // is guarded on c.pop_state being defined.
+   ["pop","population","structural state across 464 HPRC haplotypes: insertion (absent from both references), labile (interior absent in \u2265 1% of assessed haplotypes), polymorphic (absent in at least one), fixed, or not assessable",
+     i=>c.pop_state==null||R[i][c.pop_state]<0?"":(B.pop_state||[])[R[i][c.pop_state]]||"",
+     i=>{ if(c.pop_state==null||R[i][c.pop_state]<0) return '<span class="mut">\u2014</span>';
+          const v=(B.pop_state||[])[R[i][c.pop_state]]||"";
+          return (v==="insertion"||v==="labile")?'<span class="cx2">'+esc(v)+"</span>":esc(v); }],
+   ["popn","haplotypes","carrier haplotypes for an insertion locus, otherwise haplotypes with a non-reference structural call",
+     i=>c.n_pop_haplotypes==null?null:nz(R[i][c.n_pop_haplotypes]),
+     i=>c.n_pop_haplotypes==null?'<span class="mut">\u2014</span>':num(R[i][c.n_pop_haplotypes]),1]];
 }
 function browseRows(){
   const s=BST, B=BROWSE, R=B.rows, L=LM.rows, c=B.cols.reduce((o,k,n)=>(o[k]=n,o),{});
@@ -737,7 +777,7 @@ async function renderBrowse(h){
     '<button class="ucsc" id="breset" style="margin-bottom:3px">clear filters</button></div>'+
     '<div class="bsum"><span id="bcount"></span> <button class="ucsc" id="btsv" title="download the filtered rows as a tab-separated file (written in your browser)">download TSV</button>'+
     '<button class="ucsc" id="blink" title="copy a link to this filtered view">copy link</button></div>'+
-    '<div style="overflow-x:auto" id="btab"></div><div class="pager" id="bpg"></div></div>';
+    '<div id="btab"></div><div class="pager" id="bpg"></div></div>';
   const upd=()=>{ document.querySelectorAll("#view [data-b]").forEach(e=>{ const k=e.getAttribute("data-b");
       BST[k]=e.type==="checkbox"?(e.checked?1:0):e.value; }); BST.page=0; drawBrowse(); };
   document.querySelectorAll("#view [data-b]").forEach(e=>{ e.addEventListener(e.tagName==="INPUT"&&e.type!=="checkbox"?"input":"change",upd); });
@@ -777,9 +817,12 @@ function hide(){$("results").classList.remove("on");curSel=-1;}
    HERV-K108 as "K108R" -- but they are NOT merged into the exact tiers: K-10 and
    ERVK-10 are genuinely different loci, so a collapsed hit is badged as such
    rather than presented as an equal match. */
+// the catalog's own identifiers: preferred over an external scheme's identical string on a tie
+const OWN_ID_TYPES=new Set(["combined_id","versioned_id","combined_id_synonym"]);
 function fuzzySearch(q,only,cap){
+  q=String(q).replace(/-?HomSap$/i,"");
   const n=nrm(q); if(!n)return [];
-  const c=nrmc(q), out=[], seen=new Map();
+  const c=nrmc(q), out=[], seen=new Map(), QU=String(q).toUpperCase();
   const tix=only==null?-1:FZ.types.indexOf(only);
   const take=(tier,ki)=>{
     for(const p of FZ.post[ki]){
@@ -796,7 +839,8 @@ function fuzzySearch(q,only,cap){
         continue;
       }
       seen.set(sig,out.length);
-      out.push({tier,uid:FZ.uids[p[0]],type:FZ.types[p[1]],types:[FZ.types[p[1]]],
+      const lit=tier===TIER.NORM&&String(p[2]).toUpperCase()===QU;
+      out.push({tier:lit?TIER.EXACT:tier,uid:FZ.uids[p[0]],type:FZ.types[p[1]],types:[FZ.types[p[1]]],
                 str:p[2],cur:p[3],key:FZ.keys[ki]});
     }};
   const ex=KPOS.get(n); if(ex!==undefined)take(nrm(q)===String(q).toUpperCase()?TIER.EXACT:TIER.NORM,ex);
@@ -812,7 +856,8 @@ function fuzzySearch(q,only,cap){
       if(i!==ce)for(const ki of FZ.cmap[i])take(TIER.CPREFIX,ki);
     }
   }
-  out.sort((a,b)=>a.tier-b.tier||a.str.length-b.str.length||a.str.localeCompare(b.str));
+  const own=x=>x.types.some(t=>OWN_ID_TYPES.has(t))?1:0;
+  out.sort((a,b)=>a.tier-b.tier||own(b)-own(a)||a.str.length-b.str.length||a.str.localeCompare(b.str));
   return out;
 }
 
@@ -837,6 +882,7 @@ function navIndex(){
   return M;
 }
 function missillacSearch(q,only,cap){
+  q=String(q).replace(/-?HomSap$/i,"");
   const MI=navIndex();
   if(!MI||!MI.keys||!MI.keys.length)return [];
   if(only!=null&&only!=="missillac_id"&&only!=="rbrt_id")return [];
@@ -869,6 +915,86 @@ function missillacSearch(q,only,cap){
   return out;
 }
 
+/* Coordinate search (2026-11-01, D68). A span, gEVE ORF id, SoloTE/SQuIRE locus string or TElocal
+   element key is resolved by OVERLAP against locus extents (locus_coord), not by name: element-level
+   keys are not aliases. data/coord_index.json.gz (~1 MB) is fetched the first time this keyspace is
+   used, then onType() re-runs. Locus numbers index FZ.uids; n_uids guards a mismatched bundle. */
+let COORD=null, COORD_P=null;
+const CO_CAP=200;
+const COORD_HELP="span chr1:1,000,000-1,010,000 (1-based; prefix t2t: for T2T-CHM13) \u00b7 BED chr1 999999 1010000 \u00b7 "+
+  "gEVE Hsap38.chr1.895601.896266.- \u00b7 SoloTE/SQuIRE chr1|10000|10500|MER41B:ERV1:LTR|+ \u00b7 TElocal MLT1A_dup8009";
+function coordPrep(j){
+  for(const a in (j.asm||{})) for(const c in j.asm[a]){ const o=j.asm[a][c]; let p=0; o.s=o.s.map(v=>p+=v); }
+  const tm=new Map(), K=(j.te&&j.te.keys)||{};
+  for(const rn in K){ const m=new Map(); for(const r of K[rn]) m.set(r[0],r); tm.set(rn.toUpperCase(),[rn,m]); }
+  j.tem=tm; return j;
+}
+async function loadCoord(){
+  if(COORD) return COORD; if(COORD_P) return COORD_P;
+  COORD_P=(async()=>{
+    const r=await fetch("data/coord_index.json.gz");
+    if(!r.ok) return (COORD={missing:true});
+    COORD=coordPrep(JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text()));
+    return COORD; })();
+  try{ return await COORD_P; }catch(e){ console.error("coord index",e); return (COORD={missing:true,err:String(e)}); }
+  finally{ COORD_P=null; }
+}
+function parseCoordQuery(raw){
+  let q=String(raw).trim(), asm="hg38", m;
+  const am=q.match(/^(hg38|grch38|t2t|chm13|hs1)\s*[:\s]\s*(?=\S)/i);
+  if(am){ asm=/^(hg38|grch38)$/i.test(am[1])?"hg38":"t2t"; q=q.slice(am[0].length); }
+  const ch=c=>{ c=String(c).replace(/^chr/i,""); if(/^mt?$/i.test(c)) return "chrM";
+    return "chr"+(/^[xy]$/i.test(c)?c.toUpperCase():c); };
+  const num=s=>+String(s).replace(/[,_]/g,"");
+  const fin=o=>{ if(o.e<o.s){const t=o.s;o.s=o.e;o.e=t;} if(o.e===o.s)o.e=o.s+1; return o; };
+  // gEVE ORF id; numbers used as the catalog stores them (hit_geve start/end)
+  if((m=q.match(/^Hsap38\.(chr[0-9A-Za-z_]+)\.(\d+)\.(\d+)\.([+-])$/i)))
+    return fin({asm:"hg38",chrom:ch(m[1]),s:+m[2],e:+m[3],strand:m[4],src:"gEVE ORF id",conv:"gEVE numbers as stored in hit_geve"});
+  // SoloTE / SQuIRE locus string chr|start|end|name...|strand (RepeatMasker-BED derived: 0-based start)
+  if((m=q.match(/^(chr[0-9A-Za-z_.]+)\|(\d+)\|(\d+)(?:\|([^|]*))?(?:\|.*?([+-]))?\s*$/i)))
+    return fin({asm,chrom:ch(m[1]),s:+m[2],e:+m[3],strand:m[5]||"",src:"SoloTE/SQuIRE locus string"+(m[4]?" ("+m[4]+")":""),conv:"0-based start"});
+  if((m=q.match(/^(chr[0-9A-Za-z_.]+)[\t ]+([\d,]+)[\t ]+([\d,]+)/i)))
+    return fin({asm,chrom:ch(m[1]),s:num(m[2]),e:num(m[3]),src:"BED interval",conv:"0-based start"});
+  if((m=q.match(/^(?:chr)?([0-9XYMxym]{1,2}|[A-Za-z0-9_.]+?)\s*:\s*([\d,]+)\s*(?:-|\u2013|\.\.)\s*([\d,]+)(?:\s*[:(]?\s*([+-])\)?)?$/)))
+    return fin({asm,chrom:ch(m[1]),s:num(m[2])-1,e:num(m[3]),strand:m[4]||"",src:"genome-browser span",conv:"1-based closed"});
+  if((m=q.match(/^(?:chr)?([0-9XYMxym]{1,2}|[A-Za-z0-9_.]+?)\s*:\s*([\d,]+)$/)))
+    return fin({asm,chrom:ch(m[1]),s:num(m[2])-1,e:num(m[2]),src:"genome-browser position",conv:"1-based"});
+  // TElocal element key <repName>_dup<N>[:family:class]; a single-copy element's key is the bare repName
+  if((m=q.match(/^([^\s:|]+?)(?:_dup(\d+))?(?::\S*)?$/i))) return {te:m[1],dup:m[2]?+m[2]:0,src:"TElocal element key"};
+  return null;
+}
+const coPct=f=>(f>=0.995?"100":f>=0.1?(100*f).toFixed(0):(100*f).toFixed(1))+"%";
+function coordSearch(raw){
+  const p=parseCoordQuery(raw);
+  if(!p) return {rows:[],hint:"not a recognised span or element key \u2014 "+COORD_HELP};
+  if(COORD.n_uids!==FZ.uids.length) return {rows:[],hint:"coordinate index does not match this search index \u2014 rebuild the bundle"};
+  let q=p, via=null;
+  if(p.te!=null){
+    const t=COORD.tem.get(String(p.te).toUpperCase()), r=t&&t[1].get(p.dup);
+    if(!r) return {rows:[],hint:"TElocal key "+p.te+(p.dup?"_dup"+p.dup:"")+" touches no catalog locus (only the "+
+      ((COORD.te||{}).n_keys||0).toLocaleString()+" keys that do are indexed; "+((COORD.te||{}).release||"")+")"};
+    q={asm:"hg38",chrom:COORD.te.chroms[r[1]],s:r[2],e:r[2]+r[3],strand:r[4],src:"TElocal "+t[0]+(r[0]?"_dup"+r[0]:""),conv:"element span from te_element_key"};
+    via=new Set(r[5]);
+  }
+  const s=q.s, e=q.e, C=((COORD.asm||{})[q.asm]||{})[q.chrom];
+  const span=q.asm+" "+q.chrom+":"+(s+1).toLocaleString()+"\u2013"+e.toLocaleString();
+  if(!C) return {rows:[],hint:q.src+" \u2192 "+span+" \u2014 no catalog locus on "+q.chrom+" ("+q.asm+")"};
+  let lo=0, hi=C.s.length; const t0=s-C.m;
+  while(lo<hi){ const mid=(lo+hi)>>1; if(C.s[mid]<t0) lo=mid+1; else hi=mid; }
+  const H=[];
+  for(let i=lo;i<C.s.length&&C.s[i]<e;i++){ const a=C.s[i], b=a+C.l[i]; if(b<=s) continue;
+    H.push({i,a,b,ov:Math.min(b,e)-Math.max(a,s),via:via?via.has(C.u[i]):false}); }
+  H.sort((x,y)=>(y.via-x.via)||(y.ov-x.ov)||(x.a-y.a));
+  const ql=e-s;
+  const rows=H.slice(0,CO_CAP).map(h=>{
+    const uid=FZ.uids[C.u[h.i]], fq=h.ov/ql, fl=h.ov/Math.max(1,h.b-h.a);
+    return {k:(IDX.uid2cid||{})[uid]||uid,uids:[uid],cur:1,kind:"x",type:"coord",types:[],tier:0,alts:[],
+      xsub:q.asm+" "+q.chrom+":"+(h.a+1).toLocaleString()+"\u2013"+h.b.toLocaleString()+" ("+(C.t[h.i]||".")+")",
+      ovtxt:(fq>=0.999&&fl>=0.999?"same span":h.ov.toLocaleString()+" bp \u00b7 "+coPct(fq)+" of query \u00b7 "+coPct(fl)+" of locus")+(h.via?" \u00b7 TElocal":""),
+      ovtip:"overlap of the query with the locus extent (locus_coord)"+(h.via?"; this locus is listed for the key in te_element_key":"")};});
+  return {rows,hint:q.src+" \u2192 "+span+" ("+q.conv+") \u00b7 "+(H.length?H.length.toLocaleString()+
+    (H.length===1?" locus overlaps":" loci overlap")+(H.length>CO_CAP?" \u2014 first "+CO_CAP+", largest overlap first":""):"no catalog locus overlaps")};
+}
 function onType(){
   const sel=$("kspace").value,[kind,type]=sel.split(":"),raw=$("q").value.trim(),qs=raw.toUpperCase();
 
@@ -880,6 +1006,13 @@ function onType(){
     $("hint").textContent=qs?hits.length+" of "+keys.length+" values"
       :keys.length+" values — scroll or type to filter";
     return;}
+
+  if(kind==="x"){ // coordinate span / element key (D68): overlap, never fuzzy
+    if(!raw){hide();$("hint").textContent=COORD_HELP;return;}
+    if(COORD&&COORD.missing){hide();$("hint").textContent="coordinate index not in this bundle (data/coord_index.json.gz)";return;}
+    if(!COORD){$("hint").textContent="loading coordinate index\u2026";
+      loadCoord().then(()=>{ if($("kspace").value==="x:coord") onType(); });return;}
+    const r=coordSearch(raw); show(r.rows); $("hint").textContent=r.hint; return;}
 
   if(kind==="u"){ // internal joining key, explicitly selected
     if(!raw){hide();$("hint").textContent=FZ.uids.length.toLocaleString()+
@@ -965,7 +1098,8 @@ function onType(){
   $("hint").textContent=nLoci?rows.length.toLocaleString()+" result"+(rows.length==1?"":"s")+
       " · "+nLoci.toLocaleString()+(nLoci==1?" locus":" loci")+
       (nT?" — "+nT+" via prefix-collapse (see badge)":"")
-    :"no match in any naming scheme";
+    :((pq=>pq&&(pq.te==null||/_dup\d+/i.test(raw)))(parseCoordQuery(raw))?"no identifier match \u2014 this looks like a coordinate or element key: choose \u201cCoordinate span / element key\u201d in the menu"
+      :"no match in any naming scheme");
 }
 function show(hits){
   const R=$("results");
@@ -984,9 +1118,12 @@ function show(hits){
       'dropping a leading HERV/ERV — these are separate numbering systems, verify before use">'+
       TIER_BADGE[h.tier]+"</span>");
     else if(h.tier===TIER.PREFIX)badges.push('<span class="badge">prefix</span>');
+    if(IDX.meta.conflict_keys&&(IDX._ck||(IDX._ck=new Set(IDX.meta.conflict_keys))).has(nrm(h.k)))
+      badges.push('<span class="badge collapse" title="different naming schemes use this string for different loci (alias_conflict) — check the scheme label before use">scheme conflict</span>');
     if(n>1)badges.push('<span class="badge ambig">'+n+" loci</span>");
     if(h.kind==="c")badges.push('<span class="badge">'+n.toLocaleString()+" loci</span>");
     if(h.kind==="u")badges.push('<span class="badge">internal key</span>');
+    if(h.kind==="x")badges.push('<span class="badge" title="'+esc(h.ovtip||"")+'">'+esc(h.ovtxt||"")+"</span>");
     if(h.kind==="t")badges.push('<span class="badge">unit · '+h.nmem+
       (h.nmem===1?" locus":" loci")+"</span>");
     // Unmapped ERV Navigator record: says so plainly. The category is the useful
@@ -1009,7 +1146,7 @@ function show(hits){
       ? '<div class="alts">also '+h.alts.map(a=>"<b>"+esc(a.s)+"</b> <em>"+
           esc(IDENT_LABEL[a.t]||a.t)+"</em>").join(", ")+"</div>" : "";
     return '<div class="ri" data-i="'+i+'"><span><b>'+esc(h.k)+"</b> "+ty+navsec+
-      (sec&&sec!==h.k?' <em>→ '+esc(sec)+"</em>":"")+alts+"</span><span>"+badges.join(" ")+"</span></div>";
+      (h.xsub?' <em>'+esc(h.xsub)+"</em>":"")+(sec&&sec!==h.k?' <em>→ '+esc(sec)+"</em>":"")+alts+"</span><span>"+badges.join(" ")+"</span></div>";
   }).join("");
   R.classList.add("on");
   [...R.querySelectorAll(".ri[data-i]")].forEach(el=>el.onclick=()=>pick(+el.dataset.i));
@@ -1196,8 +1333,8 @@ function drawList(){
     }catch(err){ showError("Loading locus",err); }});
 }
 </script>
-<script src="detail.js?v=7bc0fae452e4"></script>
-<script src="tx.js?v=7bc0fae452e4"></script>
+<script src="detail.js?v=608fd425dc5e"></script>
+<script src="tx.js?v=608fd425dc5e"></script>
 <div id="tip"></div>
 <script>
 /* Hover cards: any element with data-tip (HTML, pre-escaped).
